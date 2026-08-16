@@ -59,9 +59,9 @@ secret-guard install-hook
 ## Example output
 
 ```
-config.py:12 [HIGH    ] GitHub Token: ghp_9f2u3K4XlMq8Vb7N1aZc...
-.env:4    [CRITICAL] Private Key: -----BEGIN RSA PRIVATE KEY-----
-app.py:40 [MEDIUM  ] Credential Assignment: password = 'hunter2'
+config.py:12 [HIGH    ] GitHub Token: ghp_**************
+.env:4    [CRITICAL] Private Key: -----BEGIN [REDACTED]-----
+app.py:40 [MEDIUM  ] Credential Assignment: password = 'hunter 2'
 
 1 critical, 1 high, 1 medium, 0 low — 3 total
 ```

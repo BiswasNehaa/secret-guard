@@ -89,7 +89,7 @@ RULES = [
         description="Amazon Web Services key (dash separated).",
     ),
     _r(
-        r"(?i)^(?:password|passwd|pwd|pass|secret|token|api[_-]?key|access[_-]?key)\s*[:=]\s*['\"]?[^'\s]{6,}['\"]?$",
+        r"(?i)^(?:password|passwd|pwd|pass|secret|token|api[_-]?key|access[_-]?key)\s*[:=][ \t]*['\"]?[^'\s]{6,}['\"]?$",
         "Credential Assignment",
         severity="medium",
         description="A variable named like a credential assigned a value.",

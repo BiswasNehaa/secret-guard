@@ -6,6 +6,7 @@ venv/
 dist/
 build/
 .pytest_cache/
+.ruff_cache/
 .tox/
 .coverage
 *.log

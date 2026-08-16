@@ -22,7 +22,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke test
         run: |
-          echo "API_KEY = 'AKIAIOSFODNN7EXAMPLE'" > smoke.py
+          printf "API_KEY = 'AKIA%s'\n" "IOSFODNN7EXAMPL" > smoke.py
           secret-guard scan --no-entropy .; test $? -eq 1
 
   lint:

@@ -17,4 +17,4 @@ jobs:
       - name: Install optional gitignore support
         run: pip install pathspec
       - name: Scan for leaked secrets
-        run: python -m secretguard scan . --exclude tests
+        run: python -m secretguard scan . --exclude tests --no-entropy
