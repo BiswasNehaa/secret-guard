@@ -30,7 +30,7 @@ seconds, right on your own machine or in CI, before the secret goes public.
 ## Install
 
 ```bash
-pip install secret-guard
+pip install secret-guard-scan
 ```
 
 Or run without installing (Python ≥ 3.8):
