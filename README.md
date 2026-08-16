@@ -90,7 +90,7 @@ Options:
 Use this in CI:
 
 ```yaml
-- run: pip install secret-guard
+- run: pip install secret-guard-scan
 - run: secret-guard scan .
 ```
 
