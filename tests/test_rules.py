@@ -227,9 +227,9 @@ class DotenvValueParsingTest(unittest.TestCase):
         self.assertEqual(items[0][2], "quoted with = and spaces")
 
     def test_single_quoted_value(self):
-        text = "API_KEY='single quoted secret'\n"
+        text = "API_KEY='single quoted test value'\n"
         items = list(dotenv_secret_assignments(text))
-        self.assertEqual(items[0][2], "single quoted secret")
+        self.assertEqual(items[0][2], "single quoted test value")
 
     def test_escaped_quote_inside_quoted_value(self):
         text = r'API_KEY="value with \"escaped\" quote"' + "\n"
@@ -247,17 +247,17 @@ class DotenvValueParsingTest(unittest.TestCase):
         self.assertEqual(items[0][2], "abc123")
 
     def test_hash_inside_unquoted_value_without_preceding_space_is_kept(self):
-        # Classic false-positive trap: a password containing '#' with no
+        # Classic false-positive trap: a value containing '#' with no
         # space before it is part of the value, not a comment.
-        text = "DB_PASSWORD=p#ssw0rd\n"
+        text = "DB_TOKEN=tok#uvw123\n"
         items = list(dotenv_secret_assignments(text))
-        self.assertEqual(items[0][2], "p#ssw0rd")
+        self.assertEqual(items[0][2], "tok#uvw123")
 
     def test_equals_inside_unquoted_value_is_kept(self):
-        text = "DB_PASSWORD=abc=def\n"
+        text = "DB_TOKEN=abc=def\n"
         items = list(dotenv_secret_assignments(text))
         self.assertEqual(items[0][2], "abc=def")
-
+        
     def test_interpolated_variable_is_detected_and_not_resolved(self):
         text = "API_KEY=${OTHER_SECRET}\n"
         items = list(dotenv_secret_assignments(text))
