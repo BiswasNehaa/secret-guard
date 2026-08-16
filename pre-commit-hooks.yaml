@@ -1,0 +1,7 @@
+# Integration for the pre-commit framework (https://pre-commit.com)
+- id: secret-guard
+  name: secret-guard
+  description: 'Scan staged files for leaked secrets.'
+  entry: secret-guard scan --staged
+  language: python
+  types: [text]

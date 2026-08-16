@@ -1,0 +1,20 @@
+name: secret-guard scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install optional gitignore support
+        run: pip install pathspec
+      - name: Scan for leaked secrets
+        run: python -m secretguard scan . --exclude tests

@@ -1,0 +1,120 @@
+"""Unit tests for console and JSON reporting."""
+
+import json
+import re
+import unittest
+
+from secretguard.reporter import format_console, format_json, mask, summarize
+
+
+def finding(rule="GitHub Token", severity="high", value="ghp_secret", line=1, path="a.py"):
+    return {
+        "path": path,
+        "value": value,
+        "rule": rule,
+        "severity": severity,
+        "line": line,
+        "description": "test",
+    }
+
+
+class MaskTest(unittest.TestCase):
+    def test_short_value_fully_masked(self):
+        self.assertEqual(mask("abc"), "***")
+
+    def test_masked_value_keeps_length(self):
+        value = "a" * 20
+        masked = mask(value)
+        self.assertEqual(len(masked), len(value))
+        self.assertEqual(masked[:6], "a" * 6)
+        self.assertEqual(masked[6:], "*" * 14)
+
+    def test_boundary_keeps_prefix_and_masks_rest(self):
+        masked = mask("abcdefghijk")  # length 11
+        self.assertEqual(masked, "abcdef" + "*" * 5)
+
+
+class SummarizeTest(unittest.TestCase):
+    def test_counts_by_severity(self):
+        findings = [
+            finding(severity="critical", value="-----BEGIN RSA PRIVATE KEY-----"),
+            finding(severity="high"),
+            finding(severity="high"),
+            finding(severity="medium"),
+            finding(severity="low", value="opaque"),
+        ]
+        summary = summarize(findings)
+        self.assertEqual(
+            summary,
+            {"critical": 1, "high": 2, "medium": 1, "low": 1, "total": 5},
+        )
+
+    def test_ignores_unknown_severity(self):
+        findings = [finding(severity="urgent")]
+        summary = summarize(findings)
+        self.assertEqual(summary["total"], 1)
+        self.assertEqual(
+            sum(summary[k] for k in ("critical", "high", "medium", "low")), 0
+        )
+
+
+class FormatConsoleTest(unittest.TestCase):
+    def test_full_value_printed_when_requested(self):
+        value = "ghp_" + "a" * 34  # "ghp_" + 34 chars
+        report = format_console([finding(value=value)], ".", show_value=True)
+        self.assertIn(value, report)
+
+    def test_value_masked_by_default_when_requested(self):
+        value = "ghp_" + "a" * 34
+        report = format_console([finding(value=value)], ".", show_value=False)
+        self.assertNotIn(value, report)
+        self.assertIn("GitHub Token", report)
+
+    def test_reveal_findings_are_not_masked(self):
+        f = finding(value="GITHUB_TOKEN", severity="high")
+        f["reveal"] = True
+        report = format_console([f], ".", show_value=False)
+        self.assertIn("GITHUB_TOKEN", report)
+
+    def test_include_only_full_value_option(self):
+        value = "ghp_" + "a" * 34
+        report = format_console([finding(value=value)], ".", show_value=False)
+        self.assertIn("a.py:1", report)
+
+    def test_summary_line_reports_totals(self):
+        findings = [
+            finding(severity="critical", value="-----BEGIN RSA PRIVATE KEY-----"),
+            finding(severity="high"),
+        ]
+        report = format_console(findings, ".", show_value=False)
+        self.assertIn("1 critical, 1 high", report)
+        self.assertIn("2 total", report)
+
+    def test_sorted_by_path_then_line(self):
+        findings = [
+            finding(path="b.py", line=2),
+            finding(path="a.py", line=9),
+            finding(path="a.py", line=1),
+        ]
+        report = format_console(findings, ".", show_value=False)
+        lines = report.splitlines()
+        self.assertLess(lines.index(next(l for l in lines if l.startswith("a.py:1"))),
+                        lines.index(next(l for l in lines if l.startswith("a.py:9"))))
+        self.assertLess(lines.index(next(l for l in lines if l.startswith("a.py:9"))),
+                        lines.index(next(l for l in lines if l.startswith("b.py:2"))))
+
+
+class FormatJsonTest(unittest.TestCase):
+    def test_roundtrip(self):
+        findings = [finding(severity="high")]
+        payload = json.loads(format_json(findings, "/repo"))
+        self.assertEqual(payload["root"], "/repo")
+        self.assertEqual(payload["findings"], findings)
+
+    def test_valid_json(self):
+        report = format_json([], ".")
+        self.assertIsNotNone(re.match(r"^\s*\{.*\}\s*$", report, re.DOTALL))
+
+
+if __name__ == "__main__":
+    unittest.main()
