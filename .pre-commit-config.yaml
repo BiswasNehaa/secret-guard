@@ -1,0 +1,26 @@
+# Pre-commit hooks for secret-guard contributors.
+# Install with:  pre-commit install
+# Run on all files with:  pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+
+  - repo: local
+    hooks:
+      - id: secret-guard
+        name: secret-guard
+        description: Scan staged files for leaked secrets.
+        entry: python -m secretguard scan --staged --exclude tests --no-entropy
+        language: system
+        pass_filenames: false

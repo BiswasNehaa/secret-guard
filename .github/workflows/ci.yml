@@ -22,8 +22,13 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke test
         run: |
-          printf "API_KEY = 'AKIA%s'\n" "IOSFODNN7EXAMPL" > smoke.py
-          secret-guard scan --no-entropy .; test $? -eq 1
+          cd "$RUNNER_TEMP"
+          printf "API_KEY = 'AKIA%s'\n" "IOSFODNN7EXAMPLE" > smoke.py
+          if secret-guard scan --no-entropy . >/dev/null 2>&1; then
+            echo "expected the scanner to fail, but it passed" >&2
+            exit 1
+          fi
+          echo "smoke test passed: scanner detected the seeded secret"
 
   lint:
     runs-on: ubuntu-latest

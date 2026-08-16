@@ -146,9 +146,13 @@ class RuleDetectionTest(unittest.TestCase):
 
 
 class EntropyCandidateTest(unittest.TestCase):
+    _MIN_HIGH_ENTROPY_LEN = 20
+
     def test_high_entropy_string_detected(self):
         values = candidate_values("secret = 0123456789abcdef0123456789abcdef")
-        self.assertTrue(any(len(v) >= 20 for v in values))
+        self.assertTrue(
+            any(len(v) >= self._MIN_HIGH_ENTROPY_LEN for v in values)
+        )
 
     def test_short_string_skipped(self):
         self.assertEqual(candidate_values("abc123"), [])

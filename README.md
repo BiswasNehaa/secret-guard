@@ -6,6 +6,12 @@
 
 Zero-dependency · Fast · CI-ready · Git-hook ready
 
+[![CI](https://github.com/taksh1507/secret-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/taksh1507/secret-guard/actions/workflows/ci.yml)
+[![secret-guard scan](https://github.com/taksh1507/secret-guard/actions/workflows/scan.yml/badge.svg)](https://github.com/taksh1507/secret-guard/actions/workflows/scan.yml)
+[![PyPI - Version](https://img.shields.io/pypi/v/secret-guard-scan)](https://pypi.org/project/secret-guard-scan/)
+[![PyPI - Python](https://img.shields.io/pypi/pyversions/secret-guard-scan)](https://pypi.org/project/secret-guard-scan/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 </div>
 
 ---
@@ -110,6 +116,8 @@ developers find it. It's free, takes one click, and keeps the project alive.
 
 We welcome contributions of any size, including new detection rules, editor
 integrations, and docs. See [CONTRIBUTING](CONTRIBUTING.md) to get started.
+Please also read our [Code of Conduct](CODE_OF_CONDUCT.md) and
+[Security Policy](SECURITY.md).
 
 ### Development
 
@@ -119,8 +127,8 @@ python -m unittest discover -s tests -v
 
 ## Roadmap
 
-- [ ] Pre-commit framework integration (`pre-commit-hooks.yaml`)
-- [ ] Editor/CI extensions (GitHub Action, Visual Studio Code, pre-commit)
+- [x] Pre-commit framework integration (`pre-commit-hooks.yaml`, `.pre-commit-config.yaml`)
+- [x] Editor/CI extensions (GitHub Actions for tests, lint, and secret scan)
 - [ ] SARIF output for GitHub code scanning
 - [ ] More languages & custom-rule manifests
 - [ ] Baseline / allowlist support

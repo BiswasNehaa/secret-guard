@@ -7,7 +7,13 @@ import unittest
 from secretguard.reporter import format_console, format_json, mask, summarize
 
 
-def finding(rule="GitHub Token", severity="high", value="ghp_secret", line=1, path="a.py"):
+def finding(
+    rule="GitHub Token",
+    severity="high",
+    value="ghp_secret",
+    line=1,
+    path="a.py",
+):
     return {
         "path": path,
         "value": value,
@@ -98,10 +104,12 @@ class FormatConsoleTest(unittest.TestCase):
         ]
         report = format_console(findings, ".", show_value=False)
         lines = report.splitlines()
-        self.assertLess(lines.index(next(l for l in lines if l.startswith("a.py:1"))),
-                        lines.index(next(l for l in lines if l.startswith("a.py:9"))))
-        self.assertLess(lines.index(next(l for l in lines if l.startswith("a.py:9"))),
-                        lines.index(next(l for l in lines if l.startswith("b.py:2"))))
+        positions = {
+            prefix: lines.index(next(ln for ln in lines if ln.startswith(prefix)))
+            for prefix in ("a.py:1", "a.py:9", "b.py:2")
+        }
+        self.assertLess(positions["a.py:1"], positions["a.py:9"])
+        self.assertLess(positions["a.py:9"], positions["b.py:2"])
 
 
 class FormatJsonTest(unittest.TestCase):

@@ -105,6 +105,7 @@ class Scanner:
         findings = []
         key_lines = set()
         if is_dotenv_path(rel_path):
+            base = os.path.basename(rel_path)
             for line_no, key, _value in dotenv_secret_assignments(text):
                 findings.append(
                     self._make_finding(
@@ -113,7 +114,7 @@ class Scanner:
                         "Environment File Secret",
                         "high",
                         line_no,
-                        f"Assigned in a {os.path.basename(rel_path)} file (value masked).",
+                        f"Assigned in a {base} file (value masked).",
                         reveal=True,
                     )
                 )
@@ -152,7 +153,9 @@ class Scanner:
         return findings
 
     @staticmethod
-    def _make_finding(path, value, rule, severity, line, description, reveal=False):
+    def _make_finding(
+        path, value, rule, severity, line, description, reveal=False
+    ):
         finding = Finding(
             path=path,
             value=value,

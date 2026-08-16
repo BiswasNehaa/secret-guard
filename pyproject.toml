@@ -20,8 +20,24 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/taksh1507/secret-guard"
+Repository = "https://github.com/taksh1507/secret-guard"
+Documentation = "https://github.com/taksh1507/secret-guard#readme"
+Issues = "https://github.com/taksh1507/secret-guard/issues"
+
 [project.scripts]
 secret-guard = "secretguard.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["secretguard*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "PL", "I"]
+
+[tool.ruff.lint.pylint]
+max-args = 7
