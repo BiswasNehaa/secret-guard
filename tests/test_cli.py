@@ -1,5 +1,6 @@
 """End-to-end tests for the secret-guard command line."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -19,11 +20,14 @@ def run_git(repo, *args):
 
 class CliTest(unittest.TestCase):
     def run_cli(self, cwd, *args):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(PROJECT_ROOT)
         return subprocess.run(
             [sys.executable, "-m", "secretguard", *args],
             capture_output=True,
             text=True,
             cwd=cwd,
+            env=env,
             check=False,
         )
 
@@ -119,6 +123,46 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("scan", result.stdout)
         self.assertIn("install-hook", result.stdout)
+
+    def test_scan_skip_rule_suppresses_finding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"aws = AKIAIOSFODNN7EXAMPLE\nTOKEN = '{SECRET}'",
+                encoding="utf-8",
+            )
+            result = self.run_cli(
+                tmp, "scan", "--skip-rule", "github-token", "."
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("AWS Access Key ID", result.stdout)
+            self.assertNotIn("GitHub Token", result.stdout)
+
+    def test_scan_only_rule_keeps_only_that_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"aws = AKIAIOSFODNN7EXAMPLE\nTOKEN = '{SECRET}'",
+                encoding="utf-8",
+            )
+            result = self.run_cli(
+                tmp, "scan", "--only-rule", "aws-access-key-id", "."
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("AWS Access Key ID", result.stdout)
+            self.assertNotIn("GitHub Token", result.stdout)
+
+    def test_scan_list_rules_lists_rule_ids(self):
+        result = self.run_cli(str(PROJECT_ROOT), "scan", "--list-rules")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("github-token", result.stdout)
+        self.assertIn("entropy", result.stdout)
+        self.assertIn("dotenv", result.stdout)
+
+    def test_scan_unknown_rule_id_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "main.py").write_text("print('clean')\n", encoding="utf-8")
+            result = self.run_cli(tmp, "scan", "--skip-rule", "nope-rule", ".")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown rule id", result.stderr)
 
 
 if __name__ == "__main__":
