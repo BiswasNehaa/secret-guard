@@ -94,6 +94,19 @@ The CLI is `secret-guard`. You can also run the repo without installing
 ```bash
 python -m secretguard
 ```
+## Docker
+
+Run secret-guard in a container — no Python install required:
+
+```bash
+docker run --rm -v "${PWD}:/code" ghcr.io/taksh1507/secret-guard:latest scan /code
+```
+
+The image runs as a non-root user by default. Mount your project directory to `/code` and pass any normal `secret-guard scan` flags after the path, for example:
+
+```bash
+docker run --rm -v "${PWD}:/code" ghcr.io/taksh1507/secret-guard:latest scan /code --no-entropy
+```
 
 ## Quick start
 
