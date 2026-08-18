@@ -141,7 +141,7 @@ class Scanner:
                     self._make_finding(
                         rel_path,
                         key,
-                        "Environment File Secret",
+                        {"name": "Environment File Secret", "id": DOTENV_RULE_ID},
                         "high",
                         line_no,
                         f"Assigned in a {base} file (value masked).",
@@ -160,7 +160,7 @@ class Scanner:
                 self._make_finding(
                     rel_path,
                     match.group(),
-                    rule["name"],
+                    {"name": rule["name"], "id": rule["id"]},
                     rule["severity"],
                     line,
                     rule["description"],
@@ -176,7 +176,7 @@ class Scanner:
                     self._make_finding(
                         rel_path,
                         value,
-                        "High Entropy String",
+                        {"name": "High Entropy String", "id": ENTROPY_RULE_ID},
                         "low",
                         line,
                         f"Detected via Shannon entropy ({entropy:.2f} bits/char).",
@@ -186,12 +186,13 @@ class Scanner:
 
     @staticmethod
     def _make_finding(
-        path, value, rule, severity, line, description, reveal=False
+        path, value, rule_info, severity, line, description, reveal=False
     ):
         finding = Finding(
             path=path,
             value=value,
-            rule=rule,
+            rule=rule_info["name"],
+            rule_id=rule_info["id"],
             severity=severity,
             line=line,
             description=description,
