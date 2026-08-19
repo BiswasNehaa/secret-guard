@@ -93,6 +93,24 @@ RULES = [
         description="Stripe live secret API key.",
     ),
     _r(
+        r"sk-[a-z0-9]{48}|sk-proj-[a-z0-9_-]{20,}",
+        "OpenAI API Key",
+        severity="high",
+        description="OpenAI API key.",
+    ),
+    _r(
+        r"sk-ant-[a-z0-9_-]{20,}",
+        "Anthropic API Key",
+        severity="high",
+        description="Anthropic API key.",
+    ),
+    _r(
+        r"[a-z0-9_-]{24,28}\.[a-z0-9_-]{6}\.[a-z0-9_-]{27,45}",
+        "Discord Bot Token",
+        severity="high",
+        description="Discord API bot token.",
+    ),
+    _r(
         r"npm_[a-z0-9]{36}",
         "npm Token",
         severity="high",
