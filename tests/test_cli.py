@@ -36,6 +36,29 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("GitHub Token", result.stdout)
 
+    def test_scan_max_findings_caps_console_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                Path(tmp, f"secret{i}.py").write_text(
+                    f"TOKEN = '{SECRET}'", encoding="utf-8"
+                )
+            result = self.run_cli(tmp, "scan", "--max-findings", "2", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout.count("GitHub Token"), 2)
+            self.assertIn("truncated", result.stdout.lower())
+
+    def test_scan_max_findings_sets_truncated_json_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                Path(tmp, f"secret{i}.py").write_text(
+                    f"TOKEN = '{SECRET}'", encoding="utf-8"
+                )
+            result = self.run_cli(tmp, "scan", "--max-findings", "2", "--json", ".")
+            self.assertEqual(result.returncode, 1)
+            data = __import__("json").loads(result.stdout)
+            self.assertTrue(data["truncated"])
+            self.assertEqual(len(data["findings"]), 2)
+
     def test_scan_returns_zero_when_clean(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "main.py").write_text("print('hello')\n", encoding="utf-8")
@@ -119,7 +142,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("scan", result.stdout)
         self.assertIn("install-hook", result.stdout)
-
+        
 
 if __name__ == "__main__":
     unittest.main()

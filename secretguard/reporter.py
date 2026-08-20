@@ -23,10 +23,15 @@ def mask(value, visible=6):
     return value[:visible] + "*" * max(0, len(value) - visible - 0)
 
 
-def format_console(findings, root, show_value=True):
+def format_console(findings, root, show_value=True, max_findings=None):
     color = should_color()
     lines = []
-    for finding in sorted(findings, key=lambda f: (f["path"], f["line"])):
+    sorted_findings = sorted(findings, key=lambda f: (f["path"], f["line"]))
+    truncated_count = 0
+    if max_findings is not None and len(sorted_findings) > max_findings:
+        truncated_count = len(sorted_findings) - max_findings
+        sorted_findings = sorted_findings[:max_findings]
+    for finding in sorted_findings:
         severity = finding["severity"]
         tag = severity.upper().ljust(8)
         if color:
@@ -43,7 +48,9 @@ def format_console(findings, root, show_value=True):
                 value=value,
             )
         )
-    lines.append("")
+        
+    if truncated_count:
+        lines.append(f"({truncated_count} additional finding(s) truncated by --max-findings)")
     summary = summarize(findings)
     summary_line = (
         "{critical} critical, {high} high, {medium} medium, {low} low — "
@@ -78,11 +85,22 @@ def summarize(findings):
     return counts
 
 
-def format_json(findings, root, show_value=False):
+def format_json(findings, root, show_value=False, max_findings=None):
+    truncated_count = 0
+    output_findings = findings
+    if max_findings is not None and len(findings) > max_findings:
+        truncated_count = len(findings) - max_findings
+        output_findings = findings[:max_findings]
+
     sanitized = []
-    for finding in findings:
+    for finding in output_findings:
         item = dict(finding)
         if not show_value and not finding.get("reveal"):
             item["value"] = mask(item["value"])
         sanitized.append(item)
-    return json.dumps({"root": root, "findings": sanitized}, indent=2)
+
+    result = {"root": root, "findings": sanitized, "truncated": truncated_count > 0}
+    if truncated_count:
+        result["truncated_count"] = truncated_count
+    return json.dumps(result, indent=2)
+       

@@ -63,6 +63,10 @@ def build_parser():
         "--staged", action="store_true",
         help="Scan only files staged in git.",
     )
+    scan.add_argument(
+        "--max-findings", type=int, default=None,
+        metavar="N", help="Print only the first N findings (exit code still reflects all detections).",
+    )
     scan.set_defaults(func=cmd_scan)
 
     hooks = subparsers.add_parser(
@@ -127,11 +131,17 @@ def cmd_scan(args):
     if args.json:
         print(
             format_json(
-                findings, os.path.abspath(args.path), show_value=args.show_value
+                findings, os.path.abspath(args.path),
+                show_value=args.show_value, max_findings=args.max_findings,
             )
         )
     else:
-        print(format_console(findings, args.path, show_value=args.show_value))
+        print(
+            format_console(
+                findings, args.path,
+                show_value=args.show_value, max_findings=args.max_findings,
+            )
+        )
     return 1 if findings else 0
 
 
