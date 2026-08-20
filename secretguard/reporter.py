@@ -13,7 +13,13 @@ SEVERITY_COLORS = {
 RESET = "\033[0m"
 
 
-def should_color():
+SCHEMA_VERSION = 1
+
+
+def should_color(force=None):
+    """force=True/False overrides auto-detection; None means auto (TTY + NO_COLOR)."""
+    if force is not None:
+        return force
     return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
@@ -22,9 +28,6 @@ def mask(value, visible=6):
         return "*" * len(value)
     return value[:visible] + "*" * max(0, len(value) - visible - 0)
 
-
-def format_console(findings, root, show_value=True, max_findings=None):
-    color = should_color()
     lines = []
     sorted_findings = sorted(findings, key=lambda f: (f["path"], f["line"]))
     truncated_count = 0
@@ -85,22 +88,10 @@ def summarize(findings):
     return counts
 
 
-def format_json(findings, root, show_value=False, max_findings=None):
-    truncated_count = 0
-    output_findings = findings
-    if max_findings is not None and len(findings) > max_findings:
-        truncated_count = len(findings) - max_findings
-        output_findings = findings[:max_findings]
 
-    sanitized = []
-    for finding in output_findings:
+ 
         item = dict(finding)
         if not show_value and not finding.get("reveal"):
             item["value"] = mask(item["value"])
         sanitized.append(item)
 
-    result = {"root": root, "findings": sanitized, "truncated": truncated_count > 0}
-    if truncated_count:
-        result["truncated_count"] = truncated_count
-    return json.dumps(result, indent=2)
-       
