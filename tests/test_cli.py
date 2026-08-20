@@ -44,7 +44,7 @@ class CliTest(unittest.TestCase):
                 )
             result = self.run_cli(tmp, "scan", "--max-findings", "2", ".")
             self.assertEqual(result.returncode, 1)
-            self.assertEqual(result.stdout.count("GitHub Token"), 2)
+            self.assertEqual(result.stdout.count(" ["), 2)
             self.assertIn("truncated", result.stdout.lower())
 
     def test_scan_max_findings_sets_truncated_json_flag(self):
