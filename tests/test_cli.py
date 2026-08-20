@@ -1,7 +1,5 @@
 """End-to-end tests for the secret-guard command line."""
 
-import hashlib
-import json
 import os
 import shutil
 import subprocess
