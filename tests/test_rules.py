@@ -88,6 +88,31 @@ class RuleDetectionTest(unittest.TestCase):
             rule_names("sk-live-1234567890abcdefghijklmnopqrstuvwxyz"),
         )
 
+    def test_openai_api_key(self):
+        self.assertIn(
+            "OpenAI API Key",
+            rule_names("key = sk-" + "a" * 48),
+        )
+        self.assertIn(
+            "OpenAI API Key",
+            rule_names("key = sk-proj-" + "a" * 20),
+        )
+
+    def test_anthropic_api_key(self):
+        self.assertIn(
+            "Anthropic API Key",
+            rule_names("key = sk-ant-" + "a" * 20),
+        )
+
+    def test_discord_bot_token(self):
+        self.assertIn(
+            "Discord Bot Token",
+            rule_names(
+                "token = 123456789012345678901234."
+                "123456.123456789012345678901234567890"
+            ),
+        )
+
     def test_npm_token(self):
         self.assertIn(
             "npm Token",
