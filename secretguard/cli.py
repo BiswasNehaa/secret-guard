@@ -1,12 +1,15 @@
 """Command-line interface for secret-guard."""
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import sys
 
 from . import __version__
 from .reporter import format_console, format_json
+from .rules import RULES, SPECIAL_RULES, unknown_rule_ids
 from .scanner import Scanner
 
 
@@ -30,6 +33,84 @@ def install_hook(target=".git/hooks/pre-commit"):
     os.chmod(hook_path, 0o755)
     print(f"Pre-commit hook installed at {hook_path}")
     return 0
+
+
+def find_config(start_path):
+    """Search upwards from start_path for secret-guard.json."""
+
+    curr = os.path.abspath(start_path)
+    if os.path.isfile(curr):
+        curr = os.path.dirname(curr)
+    while True:
+        config_file = os.path.join(curr, CONFIG_FILENAME)
+        if os.path.isfile(config_file):
+            return config_file
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        curr = parent
+    return None
+
+
+CONFIG_FILENAME = "secret-guard.json"
+KNOWN_CONFIG_KEYS = {
+    "//", "exclude", "no_entropy", "skip_rules", "only_rules", "baseline",
+}
+
+
+def _config_fatal(message):
+    print(message, file=sys.stderr)
+    sys.exit(2)
+
+
+def _require_list_of(data, key, expected_type, kind, config_path):
+    """Exit(2) unless data[key] is a list of expected_type items."""
+
+    value = data.get(key)
+    if value is None:
+        return
+    if not isinstance(value, list) or not all(
+        isinstance(x, expected_type) for x in value
+    ):
+        _config_fatal(
+            f"Error: '{key}' in {config_path} must be a list of {kind}."
+        )
+
+
+def load_config(config_path):
+    """Load and validate secret-guard.json."""
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        _config_fatal(f"Error parsing {config_path}: {e}")
+    except OSError as e:
+        _config_fatal(f"Error reading {config_path}: {e}")
+
+    if not isinstance(data, dict):
+        _config_fatal(
+            "Error: configuration root in "
+            f"{config_path} must be a JSON object."
+        )
+
+    for key in data:
+        if key not in KNOWN_CONFIG_KEYS:
+            print(
+                f"Warning: Unknown configuration key '{key}' in "
+                f"{config_path}",
+                file=sys.stderr,
+            )
+
+    _require_list_of(data, "exclude", str, "strings", config_path)
+    if "no_entropy" in data and not isinstance(data["no_entropy"], bool):
+        _config_fatal(
+            f"Error: 'no_entropy' in {config_path} must be a boolean."
+        )
+    _require_list_of(data, "skip_rules", str, "strings", config_path)
+    _require_list_of(data, "only_rules", str, "strings", config_path)
+    _require_list_of(data, "baseline", dict, "objects", config_path)
+    return data
 
 
 def build_parser():
@@ -60,12 +141,15 @@ def build_parser():
         help="Print full secret values (default masks them).",
     )
     scan.add_argument(
+        "--no-color", action="store_true",
+        help="Disable colored console output.",
+    )
+    scan.add_argument(
         "--staged", action="store_true",
         help="Scan only files staged in git.",
     )
     scan.add_argument(
-        "--max-findings", type=int, default=None,
-        metavar="N", help="Print only the first N findings (exit code still reflects all detections).",
+
     )
     scan.set_defaults(func=cmd_scan)
 
@@ -73,6 +157,11 @@ def build_parser():
         "install-hook", help="Install a git pre-commit hook."
     )
     hooks.set_defaults(func=cmd_install_hook)
+
+    init = subparsers.add_parser(
+        "init", help="Initialize a starter configuration file."
+    )
+    init.set_defaults(func=cmd_init)
 
     return parser
 
@@ -110,10 +199,104 @@ def staged_content(path):
         return None
 
 
+def list_rules():
+    """Print every available rule id with name, severity, and description."""
+
+    def fmt(info):
+        return "  {:<30} {:<30} {:>8}  {}".format(
+            info["id"], info["name"], info["severity"].upper(), info["description"]
+)
+
+    print("Regex rules:")
+    for rule in RULES:
+        print(fmt(rule))
+    print("\nSpecial rules:")
+    for info in SPECIAL_RULES.values():
+        print(fmt(info))
+    return 0
+
+
+def filter_baseline(findings, baseline):
+    if not baseline:
+        return findings
+
+    filtered = []
+    for f in findings:
+        val_hash = hashlib.sha256(f["value"].encode("utf-8")).hexdigest()
+        is_suppressed = False
+        for entry in baseline:
+            entry_path = entry.get("path", "").replace("\\", "/")
+            f_path = f["path"].replace("\\", "/")
+            if entry_path == f_path and entry.get("rule_id") == f.get("rule_id"):
+                if "hash" in entry:
+                    if entry["hash"] == val_hash:
+                        is_suppressed = True
+                        break
+                else:
+                    is_suppressed = True
+                    break
+        if not is_suppressed:
+            filtered.append(f)
+    return filtered
+
+
+def resolve_baseline(args, config):
+    """Return the list of suppressed findings from CLI --baseline or config."""
+
+    baseline_path = getattr(args, "baseline", None)
+    if baseline_path:
+        try:
+            with open(baseline_path, encoding="utf-8") as f:
+                return json.load(f).get("baseline", [])
+        except (OSError, json.JSONDecodeError, AttributeError) as e:
+            print(f"Error loading baseline file: {e}", file=sys.stderr)
+            sys.exit(2)
+    return config.get("baseline", [])
+
+
 def cmd_scan(args):
+    scan_path = "." if args.staged else args.path
+    config_file = find_config(scan_path)
+    config = {}
+    if config_file:
+        config = load_config(config_file)
+
+    # CLI flags override config values
+    exclude = args.exclude if args.exclude else config.get("exclude", [])
+    if args.skip_rule or args.only_rule:
+        skip_rules = args.skip_rule
+        only_rules = args.only_rule
+    else:
+        skip_rules = config.get("skip_rules", [])
+        only_rules = config.get("only_rules", [])
+    no_entropy = args.no_entropy or config.get("no_entropy", False)
+
+    unknown = unknown_rule_ids(skip_rules + only_rules)
+    if unknown:
+        print(
+            "unknown rule id{}: {}".format(
+                "s" if len(unknown) > 1 else "", ", ".join(unknown)
+            ),
+            file=sys.stderr,
+        )
+        print(
+            "use --list-rules to see every available rule id", file=sys.stderr
+        )
+        return 2
+
+    if args.list_rules:
+        return list_rules()
+
+    baseline = resolve_baseline(args, config)
+
     if args.staged:
         files = staged_files()
-        scanner = Scanner(".", excludes=args.exclude)
+        scanner = Scanner(
+            ".",
+            excludes=exclude,
+            skip_rules=skip_rules,
+            only_rules=only_rules,
+        )
         findings = []
         for rel in files:
             candidate = os.path.relpath(rel, scanner.root).replace(os.sep, "/")
@@ -124,9 +307,16 @@ def cmd_scan(args):
                 continue
             findings.extend(scanner.scan_text(rel, text))
     else:
-        scanner = Scanner(args.path, excludes=args.exclude)
-        scanner.include_entropy = not args.no_entropy
+        scanner = Scanner(
+            args.path,
+            excludes=exclude,
+            skip_rules=skip_rules,
+            only_rules=only_rules,
+        )
+        scanner.include_entropy = not no_entropy
         findings = scanner.scan()
+
+    findings = filter_baseline(findings, baseline)
 
     if args.json:
         print(
@@ -136,13 +326,41 @@ def cmd_scan(args):
             )
         )
     else:
-        print(
-            format_console(
-                findings, args.path,
-                show_value=args.show_value, max_findings=args.max_findings,
+
             )
         )
     return 1 if findings else 0
+
+
+def cmd_init(args):
+    path = CONFIG_FILENAME
+    if os.path.exists(path):
+        print(
+            f"Error: {path} already exists in the current directory.",
+            file=sys.stderr,
+        )
+        return 1
+
+    config_content = {
+        "//": (
+            "Secret-Guard Configuration File. Refer to "
+            "https://github.com/taksh1507/secret-guard for details."
+        ),
+        "exclude": [],
+        "no_entropy": False,
+        "skip_rules": [],
+        "only_rules": [],
+    }
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(config_content, f, indent=2)
+            f.write("\n")
+        print(f"Initialized starter configuration at {path}")
+        return 0
+    except OSError as e:
+        print(f"Error writing starter configuration: {e}", file=sys.stderr)
+        return 1
 
 
 def cmd_install_hook(args):
