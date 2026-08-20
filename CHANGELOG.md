@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/taksh1507/secret-guard/compare/v0.3.1...v0.4.0) (2026-08-20)
+
+
+### Features
+
+* **rules:** add OpenAI, Anthropic, and Discord bot token detection ([9b04cd4](https://github.com/taksh1507/secret-guard/commit/9b04cd478bd90a36dfd71f914bbb8240198059c1))
+* **rules:** add OpenAI, Anthropic, and Discord bot token detection ([0f01ed5](https://github.com/taksh1507/secret-guard/commit/0f01ed5c4844ce266693dced18a29d784929cab5))
+* **rules:** add OpenAI, Anthropic, and Discord bot token detection ([#62](https://github.com/taksh1507/secret-guard/issues/62)) ([9b04cd4](https://github.com/taksh1507/secret-guard/commit/9b04cd478bd90a36dfd71f914bbb8240198059c1))
+
 ## [0.3.1](https://github.com/taksh1507/secret-guard/compare/v0.3.0...v0.3.1) (2026-08-18)
 
 
