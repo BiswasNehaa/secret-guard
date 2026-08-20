@@ -107,7 +107,10 @@ class RuleDetectionTest(unittest.TestCase):
     def test_discord_bot_token(self):
         self.assertIn(
             "Discord Bot Token",
-            rule_names("token = 123456789012345678901234.123456.123456789012345678901234567890"),
+            rule_names(
+                "token = 123456789012345678901234."
+                "123456.123456789012345678901234567890"
+            ),
         )
 
     def test_npm_token(self):
