@@ -335,12 +335,32 @@ is exactly what would otherwise be committed.
 
 ```bash
 python -m unittest discover -s tests
-python -m ruff check secretguard tests
+python -m ruff check secretguard tests benchmarks
 python -m secretguard scan . --exclude tests --no-entropy
 ```
 
 The repository enforces these in CI (tests on Python 3.9 / 3.11 / 3.13, linting,
-and a self-scan job) and runs GitGuardian on every pull request.
+a benchmark job, and a self-scan job) and runs GitGuardian on every pull request.
+
+## Benchmarks
+
+`benchmarks/` guards scan performance against silent regressions. It generates
+a synthetic, seeded corpus (200 files, one seeded secret per file) and times a
+scan over it:
+
+```bash
+python -m benchmarks.run
+```
+
+This checks the measured throughput against a stored baseline
+(`benchmarks/baseline.json`) and fails if it drops to less than half of that
+baseline — generous enough to absorb normal machine/CI-runner variance while
+still catching a genuine multi-x slowdown. After an intentional, verified
+performance change, update the stored baseline with:
+
+```bash
+python -m benchmarks.run --update-baseline
+```
 
 ## Contributing
 
