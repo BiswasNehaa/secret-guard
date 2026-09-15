@@ -19,6 +19,16 @@ inputs:
     description: Disable high-entropy string detection.
     required: false
     default: "false"
+  comment-on-fail:
+    description: >-
+      Post a masked summary of the findings as a pull request comment when
+      the scan fails. Requires the calling workflow to grant
+      `permissions: pull-requests: write`. Automatically skipped on a
+      forked pull request (the default token there has no write access)
+      and on any non-pull_request trigger. The comment is updated in
+      place on later runs rather than duplicated.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -45,11 +55,67 @@ runs:
         if [ "${{ inputs.no-entropy }}" = "true" ]; then
           extra+=(--no-entropy)
         fi
+        # Never let this step itself fail: the scan's real exit code is
+        # captured below and enforced by the last step instead, so a
+        # comment can be posted first when comment-on-fail is set.
+        set +e
         if [ "${{ inputs.json }}" = "true" ]; then
-          secret-guard scan --json "${extra[@]}" "$INPUT_PATH"
+          output=$(secret-guard scan --json "${extra[@]}" "$INPUT_PATH" 2>&1)
         else
-          secret-guard scan "${extra[@]}" "$INPUT_PATH"
+          output=$(secret-guard scan "${extra[@]}" "$INPUT_PATH" 2>&1)
         fi
+        status=$?
+        set -e
+        echo "$output"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "$output" > "$RUNNER_TEMP/secret-guard-scan-output.txt"
+      shell: bash
+
+    - name: Comment on the pull request
+      if: >-
+        inputs.comment-on-fail == 'true' &&
+        steps.scan.outputs.status != '0' &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      # A comment is a nice-to-have on top of the real pass/fail signal
+      # (enforced by the next step regardless), never a reason to break
+      # the job -- e.g. if the calling workflow didn't grant
+      # pull-requests: write, this call 403s and is swallowed here.
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        MARKER: <!-- secret-guard-scan-comment -->
+      run: |
+        body_file="$RUNNER_TEMP/secret-guard-comment-body.txt"
+        {
+          echo "$MARKER"
+          echo "### 🔒 secret-guard found potential secrets"
+          echo
+          echo "Values are masked. Run \`secret-guard scan --show-value\` locally"
+          echo "against the reported path/line to see the full match before rotating it."
+          echo
+          echo '```'
+          cat "$RUNNER_TEMP/secret-guard-scan-output.txt"
+          echo '```'
+        } > "$body_file"
+
+        existing_id=$(
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq "[.[] | select(.body | startswith(\"$MARKER\"))][-1].id"
+        )
+
+        if [ -n "$existing_id" ]; then
+          gh api --method PATCH "repos/$REPO/issues/comments/$existing_id" -f "body=@$body_file" >/dev/null
+        else
+          gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" -f "body=@$body_file" >/dev/null
+        fi
+      shell: bash
+
+    - name: Fail the job if secrets were found
+      if: steps.scan.outputs.status != '0'
+      run: exit "${{ steps.scan.outputs.status }}"
       shell: bash
 
 branding:

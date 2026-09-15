@@ -56,3 +56,38 @@ jobs:
         run: |
           echo "expected the excluded scan to pass, but it failed" >&2
           exit 1
+
+  comment-on-fail:
+    runs-on: ubuntu-latest
+    # Only this job gets comment-write access, and only so a same-repo
+    # (non-fork) run of this workflow can exercise the real post/update
+    # path end to end. A forked pull_request run -- which is what this
+    # workflow sees for a contribution from outside the repo -- never
+    # reaches that path at all: the action's own head-repo check skips
+    # commenting before any API call is attempted, which is exactly the
+    # behavior this job's assertion verifies.
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed a fake secret
+        run: |
+          mkdir -p "$RUNNER_TEMP/sg-comment-seed"
+          prefix="ghp_"
+          printf "token = '%s%s'\n" "$prefix" "1234567890abcdefghijklmnopqrstuvwxyz" \
+            > "$RUNNER_TEMP/sg-comment-seed/seed.py"
+
+      - name: Run the action with comment-on-fail enabled
+        id: scan
+        continue-on-error: true
+        uses: ./.github/actions/secret-guard
+        with:
+          path: ${{ runner.temp }}/sg-comment-seed
+          comment-on-fail: "true"
+
+      - name: Assert detection still failed the job
+        if: steps.scan.outcome != 'failure'
+        run: |
+          echo "expected the action to still fail the job with comment-on-fail set, but it succeeded" >&2
+          exit 1

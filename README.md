@@ -127,6 +127,7 @@ by the action itself.
 | `exclude` | *(empty)* | Directory names to skip, one per line |
 | `json` | `false` | Emit findings as JSON (values still masked) |
 | `no-entropy` | `false` | Disable high-entropy string detection |
+| `comment-on-fail` | `false` | Post a masked summary as a pull request comment when the scan fails |
 
 Add it to an existing workflow:
 
@@ -141,6 +142,32 @@ steps:
         tests
         .venv
 ```
+
+### Commenting on the pull request
+
+Set `comment-on-fail: true` to have a failing scan post its masked findings as
+a PR comment, in addition to failing the job. The calling workflow needs to
+grant comment-write access:
+
+```yaml
+permissions:
+  pull-requests: write
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: taksh1507/secret-guard@v1
+    with:
+      comment-on-fail: true
+```
+
+- The comment is **updated in place** on later runs of the same PR rather
+  than duplicated.
+- On a **forked** pull request, the default `GITHUB_TOKEN` has no write
+  access; commenting is automatically skipped there (the scan still fails
+  the job normally), so this is safe to enable even for a public repo that
+  accepts contributions from forks.
+- Commenting never affects the pass/fail result — a permissions problem
+  or API error while posting is swallowed rather than breaking the job.
 
 ## Docker
 
