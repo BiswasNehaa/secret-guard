@@ -46,6 +46,9 @@ value.
 - **Git-aware staged scanning** (`--staged`) — reads the git index blob rather
   than the working tree, so secrets that are staged but already deleted from
   disk are still detected.
+- **Git history scanning** (`--history`) — walks every commit reachable from
+  `HEAD` and reports the commit that first introduced each secret, so a leak
+  that was removed but never rotated doesn't hide from a working-tree scan.
 - **gitignore-aware** — skips `.git`, `node_modules`, `venv`, and anything your
   `.gitignore` already covers; repeatable `--exclude` handles the rest.
 - **Entropy detection** — flags high-entropy strings even when no rule matches.
@@ -86,6 +89,9 @@ cat config.py | secret-guard scan --stdin --filename config.py
 
 # Scan only files staged for commit (reads the git index)
 secret-guard scan --staged
+
+# Scan the full git history for secrets that were removed but never rotated
+secret-guard scan --history
 
 # Enforce a severity threshold before failing the scan
 secret-guard scan . --severity high
@@ -181,6 +187,9 @@ options:
   --no-color          Disable colored console output
   --quiet             Suppress all scan output; only the exit code is set
   --staged            Scan only files staged in git
+  --history           Scan every commit in git history instead of the
+                      working tree; reports the commit that first
+                      introduced each secret
   --baseline FILE     Suppress findings listed in a baseline file
   --severity LEVEL    Minimum severity to fail the scan (low, medium, high, critical)
   --max-findings N    Cap the number of findings printed to N; the scan still

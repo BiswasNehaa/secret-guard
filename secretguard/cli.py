@@ -235,6 +235,14 @@ def build_parser():
         help="Scan only files staged in git.",
     )
     scan.add_argument(
+        "--history", action="store_true",
+        help=(
+            "Scan every commit in git history instead of the working tree. "
+            "Each secret is reported once, at the commit that first "
+            "introduced it."
+        ),
+    )
+    scan.add_argument(
         "--baseline", metavar="FILE",
         help="Path to a baseline file containing allowed/suppressed secrets.",
     )
@@ -310,6 +318,70 @@ def staged_content(path):
 
     result = subprocess.run(
         ["git", "show", ":" + path],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return result.stdout.decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+
+
+def history_commits():
+    """Return every commit hash reachable from HEAD, oldest first.
+
+    An empty list means either "not a git repository" (a warning is
+    printed, matching staged_files()'s behavior) or a real repository with
+    no commits yet (a fresh `git init`, or history trimmed to nothing) —
+    both are treated as "nothing to scan" rather than a fatal error.
+    """
+
+    check = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check.returncode != 0 or check.stdout.strip() != "true":
+        print("git is not available or not a repository.", file=sys.stderr)
+        return []
+    result = subprocess.run(
+        ["git", "log", "--reverse", "--format=%H"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def commit_tree_entries(commit):
+    """Yield (blob_sha, path) for every tracked file at commit."""
+
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", commit],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return
+    ls_tree_line_parts = 3
+    for line in result.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) == ls_tree_line_parts and parts[1] == "blob" and path:
+            yield parts[2], path
+
+
+def blob_content(blob_sha):
+    """Return the text content of a git blob object, or None if unreadable."""
+
+    result = subprocess.run(
+        ["git", "cat-file", "-p", blob_sha],
         capture_output=True,
         check=False,
     )
@@ -407,6 +479,59 @@ def _scan_staged(exclude, skip_rules, only_rules, custom_rules):
     return findings
 
 
+def _scan_history(
+    exclude, skip_rules, only_rules, custom_rules, no_entropy, include_comments,
+):
+    """Scan every commit's tree for secrets, oldest first.
+
+    Each unique blob (by git's own content hash) is fetched and scanned at
+    most once however many commits or paths reference it, so an unchanged
+    file is never rescanned commit after commit. A given secret (by path,
+    rule, and value) is reported once, at the first commit where it was
+    observed, with that commit noted in its description.
+
+    Note: this walks the full history reachable from HEAD via `git
+    ls-tree` per commit, which is fine for the histories this is tested
+    against but isn't optimized for very large repositories — that's a
+    known scope boundary, not a correctness issue.
+    """
+
+    scanner = Scanner(
+        ".", excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
+        custom_rules=custom_rules,
+    )
+    scanner.include_entropy = not no_entropy
+    scanner.skip_comments = not include_comments
+
+    findings = []
+    seen_blobs = set()
+    reported = set()
+    for commit in history_commits():
+        for blob_sha, path in commit_tree_entries(commit):
+            if blob_sha in seen_blobs:
+                continue
+            seen_blobs.add(blob_sha)
+            if scanner._is_binary(path) or scanner._is_ignored(path):
+                continue
+            text = blob_content(blob_sha)
+            if text is None:
+                continue
+            for finding in scanner.scan_text(path, text):
+                value_hash = hashlib.sha256(
+                    finding["value"].encode("utf-8")
+                ).hexdigest()
+                key = (finding["path"], finding["rule_id"], value_hash)
+                if key in reported:
+                    continue
+                reported.add(key)
+                finding["description"] = (
+                    f"{finding['description']} "
+                    f"(first introduced in commit {commit[:7]})"
+                )
+                findings.append(finding)
+    return findings
+
+
 def _scan_path(path, exclude, skip_rules, only_rules, no_entropy, custom_rules):
     scanner = Scanner(
         path, excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
@@ -416,13 +541,21 @@ def _scan_path(path, exclude, skip_rules, only_rules, no_entropy, custom_rules):
     return scanner.scan()
 
 
-def _run_scan(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _run_scan(
+    args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments=False,
+):
     if args.stdin:
         return _scan_stdin(
             args, exclude, skip_rules, only_rules, no_entropy, custom_rules
         )
     if args.staged:
         return _scan_staged(exclude, skip_rules, only_rules, custom_rules)
+    if args.history:
+        return _scan_history(
+            exclude, skip_rules, only_rules, custom_rules, no_entropy,
+            include_comments,
+        )
     multi = len(args.paths) > 1
     findings = []
     for path in args.paths:
@@ -510,7 +643,7 @@ def _render_output(args, findings, shown, root, truncated):
 
 
 def cmd_scan(args):
-    scan_path = "." if (args.staged or args.stdin) else args.paths[0]
+    scan_path = "." if (args.staged or args.stdin or args.history) else args.paths[0]
     config_file = find_config(scan_path)
     config = {}
     if config_file:

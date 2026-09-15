@@ -30,6 +30,7 @@ secret-guard scan [path] [options]
 | `--reveal-prefix N` | Show first N characters of the masked secret |
 | `--reveal-suffix N` | Show last N characters of the masked secret |
 | `--staged` | Scan only files staged in git |
+| `--history` | Scan every commit in git history instead of the working tree |
 | `--skip-rule RULE` | Never run the given rule id (repeatable) |
 | `--only-rule RULE` | Run only the given rule id (repeatable) |
 | `--list-rules` | List every available rule id and exit |
@@ -59,6 +60,21 @@ Installs a git pre-commit hook so every future commit runs a scan.
 Reads each staged file from the **git index** (`git show :<path>`) rather than
 the working tree. This catches secrets that were staged and then deleted before
 commit — exactly what would otherwise be committed.
+
+### `--history`
+
+Scans every commit reachable from `HEAD` instead of the working tree, so a
+secret that was committed and later removed is still caught. Each unique
+blob (by git's own content hash) is fetched and scanned once no matter how
+many commits or paths reference it, and each secret is reported once, at
+the commit that first introduced it — the commit's short hash is appended
+to the finding's description. Values are masked by default; `--show-value`
+still works. A directory with no commits yet, or that isn't a git
+repository at all, scans clean (exit code `0`) rather than failing.
+
+This walks the full history reachable from `HEAD`, which isn't optimized
+for very large repositories — a known scope boundary, not a correctness
+issue.
 
 ### `--json`
 

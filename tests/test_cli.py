@@ -136,6 +136,105 @@ class CliTest(unittest.TestCase):
             result = self.run_cli(str(repo), "scan", "--staged")
             self.assertEqual(result.returncode, 0)
 
+    def _init_repo(self, repo):
+        repo.mkdir()
+        run_git(repo, "init", "-q")
+        run_git(repo, "config", "user.email", "test@example.com")
+        run_git(repo, "config", "user.name", "Test")
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_history_finds_secret_removed_from_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp, "repo")
+            self._init_repo(repo)
+            leak = repo / "leak.py"
+            leak.write_text(f"TOKEN = '{SECRET}'\n", encoding="utf-8")
+            run_git(repo, "add", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "add leak")
+            run_git(repo, "rm", "-q", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "remove leak")
+
+            no_history = self.run_cli(str(repo), "scan", ".")
+            self.assertEqual(no_history.returncode, 0)
+
+            result = self.run_cli(str(repo), "scan", "--history")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("GitHub Token", result.stdout)
+            self.assertNotIn(SECRET, result.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_history_reports_the_introducing_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp, "repo")
+            self._init_repo(repo)
+            (repo / "leak.py").write_text(
+                f"TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            run_git(repo, "add", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "add leak")
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+            result = self.run_cli(str(repo), "scan", "--history", "--json")
+            self.assertEqual(result.returncode, 1)
+            payload = json.loads(result.stdout)
+            description = payload["findings"][0]["description"]
+            self.assertIn(commit[:7], description)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_history_reports_unchanged_secret_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp, "repo")
+            self._init_repo(repo)
+            leak = repo / "leak.py"
+            leak.write_text(f"TOKEN = '{SECRET}'\n", encoding="utf-8")
+            run_git(repo, "add", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "add leak")
+            leak.write_text(
+                f"TOKEN = '{SECRET}'\nEXTRA = 1\n", encoding="utf-8"
+            )
+            run_git(repo, "add", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "unrelated tweak")
+
+            result = self.run_cli(str(repo), "scan", "--history", "--json")
+            self.assertEqual(result.returncode, 1)
+            payload = json.loads(result.stdout)
+            github_findings = [
+                f for f in payload["findings"] if f["rule"] == "GitHub Token"
+            ]
+            self.assertEqual(len(github_findings), 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_history_show_value_exposes_full_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp, "repo")
+            self._init_repo(repo)
+            (repo / "leak.py").write_text(
+                f"TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            run_git(repo, "add", "leak.py")
+            run_git(repo, "commit", "-q", "-m", "add leak")
+
+            result = self.run_cli(str(repo), "scan", "--history", "--show-value")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(SECRET, result.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_history_empty_repo_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp, "repo")
+            self._init_repo(repo)
+            result = self.run_cli(str(repo), "scan", "--history")
+            self.assertEqual(result.returncode, 0)
+
+    def test_history_not_a_git_repo_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self.run_cli(tmp, "scan", "--history")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("not a repository", result.stderr)
+
     def test_scan_json_masks_values_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "secret.py").write_text(
