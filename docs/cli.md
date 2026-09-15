@@ -115,6 +115,27 @@ Rule ids are stable slugs (e.g. `github-token`, `aws-access-key-id`,
 Unknown rule ids abort the scan with exit code `2` so a typo can never
 silently disable a rule.
 
+### Inline allowlist pragmas
+
+A line carrying a `secret-guard:ignore` comment is excluded from the report,
+regardless of the comment style (`#`, `//`, or any other prefix — the pragma
+is matched anywhere on the line):
+
+```python
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # secret-guard:ignore
+```
+
+Scope it to specific rule ids (comma-separated) to suppress only those rules
+on that line, leaving any other finding on the same line intact:
+
+```python
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # secret-guard:ignore github-token
+```
+
+Unlike `--skip-rule` (disables a rule everywhere) or `--baseline` (suppresses
+by path + rule id, from outside the source), a pragma is a one-line, in-source
+allowlist reviewable in the same diff as the secret it exempts.
+
 ### `--baseline`
 
 A baseline acknowledges known findings so CI stays green while new leaks

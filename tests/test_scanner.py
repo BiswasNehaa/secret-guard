@@ -151,6 +151,43 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(line_number("a\nb\nc", 0), 1)
         self.assertEqual(line_number("a\nb\nc", 4), 3)
 
+    def test_pragma_ignore_suppresses_finding_on_that_line(self):
+        self.write("secret.py", f"token = {TOKEN}  # secret-guard:ignore\n")
+        self.assertEqual(self.make_scanner().scan(), [])
+
+    def test_pragma_ignore_does_not_affect_other_lines(self):
+        self.write(
+            "secret.py",
+            f"token = {TOKEN}  # secret-guard:ignore\n"
+            f"other = {TOKEN}\n",
+        )
+        findings = self.make_scanner().scan()
+        lines = {f["line"] for f in findings}
+        self.assertEqual(lines, {2})
+        self.assertTrue(has_rule(findings, "GitHub Token"))
+
+    def test_pragma_ignore_scoped_to_rule_id_suppresses_only_that_rule(self):
+        self.write(
+            "secret.py",
+            "aws = AKIAIOSFODNN7EXAMPLE  # secret-guard:ignore github-token\n",
+        )
+        findings = self.make_scanner().scan()
+        self.assertTrue(has_rule(findings, "AWS Access Key ID"))
+
+    def test_pragma_ignore_scoped_to_rule_id_leaves_other_rules_on_same_line(self):
+        # A high-entropy AWS-style string would also trip the entropy rule;
+        # scoping the pragma to github-token must not suppress that finding.
+        self.write(
+            "secret.py",
+            f"token = {TOKEN}  # secret-guard:ignore github-token\n",
+        )
+        findings = self.make_scanner().scan()
+        self.assertFalse(has_rule(findings, "GitHub Token"))
+
+    def test_pragma_ignore_slash_slash_comment(self):
+        self.write("secret.js", f"const token = '{TOKEN}'; // secret-guard:ignore\n")
+        self.assertEqual(self.make_scanner().scan(), [])
+
 
 class CustomRuleScannerTest(unittest.TestCase):
     def setUp(self):
