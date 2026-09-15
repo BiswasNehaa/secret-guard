@@ -13,6 +13,18 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+try:
+    import tomllib  # noqa: F401
+
+    HAS_TOMLLIB = True
+except ImportError:
+    try:
+        import tomli  # noqa: F401
+
+        HAS_TOMLLIB = True
+    except ImportError:
+        HAS_TOMLLIB = False
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SECRET = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
 CUSTOM_SECRET = "acme_tok_0123456789abcdef0123"
@@ -448,6 +460,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("Error parsing", result.stderr)
 
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
     def test_scan_loads_config_from_pyproject_toml(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "pyproject.toml").write_text(
@@ -491,6 +504,7 @@ class CliTest(unittest.TestCase):
             # secret-guard.json wins and does not exclude "wip"
             self.assertEqual(result.returncode, 1)
 
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
     def test_scan_pyproject_toml_config_warning_on_unknown_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "pyproject.toml").write_text(
@@ -518,6 +532,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("GitHub Token", result.stdout)
 
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
     def test_scan_pyproject_toml_config_validation_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "pyproject.toml").write_text(
