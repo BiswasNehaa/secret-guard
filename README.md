@@ -288,6 +288,21 @@ with `--baseline baseline.json` or through the `baseline` key of
 `secret-guard.json`. Scanned values are hashed client-side, so the baseline
 never needs to contain the secret itself.
 
+Rather than hand-writing one, scaffold a baseline from whatever a scan
+currently finds:
+
+```bash
+secret-guard baseline . --output secret-guard-baseline.json
+secret-guard scan . --baseline secret-guard-baseline.json  # exits 0 now
+```
+
+This is the fastest way to adopt secret-guard on an existing codebase: every
+current finding is baselined in one step, and anything added afterward is
+still caught normally. `secret-guard baseline` accepts the same
+`--exclude`/`--no-entropy`/`--skip-rule`/`--only-rule`/`--rules-path` flags as
+`scan`, so the baseline reflects the same rules a real scan would apply. It
+refuses to overwrite an existing `--output` file unless `--force` is given.
+
 ### Severity and exit codes
 
 - `0` — no secrets found, or all findings are below the `--severity` threshold
