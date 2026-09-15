@@ -49,8 +49,9 @@ value.
 - **gitignore-aware** — skips `.git`, `node_modules`, `venv`, and anything your
   `.gitignore` already covers; repeatable `--exclude` handles the rest.
 - **Entropy detection** — flags high-entropy strings even when no rule matches.
-- **Configurable** — command-line flags, a checked-in `secret-guard.json`
-  config, custom rule manifests, baselines, and severity thresholds.
+- **Configurable** — command-line flags, a checked-in `secret-guard.json` (or
+  `[tool.secret-guard]` in `pyproject.toml`) config, custom rule manifests,
+  baselines, and severity thresholds.
 - **Fast, single-file deployment** — works in CI with a single `pip install`.
 
 ## Installation
@@ -235,6 +236,19 @@ Command-line flags override configuration values. Scaffold a starter file with:
 ```bash
 secret-guard init
 ```
+
+The same keys can instead live under `[tool.secret-guard]` in `pyproject.toml`,
+for projects that would rather not add another config file:
+
+```toml
+[tool.secret-guard]
+exclude = ["tests", ".venv"]
+skip_rules = ["generic-secret-key"]
+```
+
+Precedence is flags > `secret-guard.json` > `pyproject.toml`; a project with
+both uses `secret-guard.json`. See
+[docs/cli.md](docs/cli.md#configuration-in-pyprojecttoml) for details.
 
 ### Custom rule manifests
 

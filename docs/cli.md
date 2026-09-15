@@ -147,3 +147,26 @@ parent, then merges it with flags (flags win):
 
 Unknown keys, wrong types, or malformed JSON abort the scan with exit code
 `2` and an error on stderr; unknown keys warn on stderr without failing.
+
+### Configuration in `pyproject.toml`
+
+As an alternative to a standalone `secret-guard.json`, the same keys can live
+under `[tool.secret-guard]` in `pyproject.toml`:
+
+```toml
+[tool.secret-guard]
+exclude = ["wip"]
+no_entropy = true
+skip_rules = ["generic-secret-key"]
+```
+
+Discovery walks upward the same way as `secret-guard.json`. If a directory in
+that walk has an explicit `secret-guard.json` anywhere, it wins over any
+`pyproject.toml`; otherwise the closest `pyproject.toml` with a
+`[tool.secret-guard]` table is used. A `pyproject.toml` with no such table is
+ignored, so unrelated Python projects are unaffected. The same key validation
+and exit-code-`2` behavior applies to values under `[tool.secret-guard]`.
+
+Reading `pyproject.toml` uses the standard-library `tomllib` (Python 3.11+);
+on older Pythons it falls back to the `tomli` package if installed, and is
+otherwise skipped — `secret-guard.json` remains fully supported everywhere.

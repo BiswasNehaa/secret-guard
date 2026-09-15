@@ -448,6 +448,85 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("Error parsing", result.stderr)
 
+    def test_scan_loads_config_from_pyproject_toml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\n'
+                'exclude = ["wip"]\n'
+                'no_entropy = true\n',
+                encoding="utf-8",
+            )
+            Path(tmp, "wip").mkdir()
+            Path(tmp, "wip", "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)  # Excluded, so clean!
+
+    def test_scan_pyproject_toml_without_section_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[project]\nname = "demo"\n', encoding="utf-8"
+            )
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("GitHub Token", result.stdout)
+
+    def test_secret_guard_json_takes_precedence_over_pyproject_toml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nexclude = ["wip"]\n', encoding="utf-8"
+            )
+            Path(tmp, "secret-guard.json").write_text(
+                '{"exclude": []}', encoding="utf-8"
+            )
+            Path(tmp, "wip").mkdir()
+            Path(tmp, "wip", "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            # secret-guard.json wins and does not exclude "wip"
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_pyproject_toml_config_warning_on_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nunknown_key = "val"\n', encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(
+                "Warning: Unknown configuration key 'unknown_key'",
+                result.stderr,
+            )
+
+    def test_malformed_pyproject_toml_is_silently_skipped(self):
+        # A pyproject.toml that fails to parse might belong to an unrelated
+        # tool and have nothing to do with secret-guard, so it is treated as
+        # "no config found" rather than a fatal error.
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                "[tool.secret-guard\n", encoding="utf-8"
+            )
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("GitHub Token", result.stdout)
+
+    def test_scan_pyproject_toml_config_validation_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nno_entropy = "yes"\n', encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be a boolean", result.stderr)
+
     def test_init_scaffolds_documented_starter_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = self.run_cli(tmp, "init")
