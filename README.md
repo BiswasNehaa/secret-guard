@@ -49,6 +49,8 @@ value.
 - **gitignore-aware** — skips `.git`, `node_modules`, `venv`, and anything your
   `.gitignore` already covers; repeatable `--exclude` handles the rest.
 - **Entropy detection** — flags high-entropy strings even when no rule matches.
+- **Comment-aware** — a secret-like value that lives only in a `#`/`//`/block
+  comment is skipped by default; the same value in executable code isn't.
 - **Configurable** — command-line flags, a checked-in `secret-guard.json`
   config, custom rule manifests, baselines, and severity thresholds.
 - **Fast, single-file deployment** — works in CI with a single `pip install`.
@@ -169,6 +171,8 @@ positional arguments:
 options:
   --exclude DIR       Additional directory names to skip (repeatable)
   --no-entropy        Disable high-entropy string detection
+  --include-comments  Also report secrets found only inside a comment
+                      (default skips them)
   --json              Output findings as JSON
   --csv               Output findings as CSV
   --summary           Print only the severity summary instead of the
@@ -213,6 +217,11 @@ secret-guard scan --list-rules
 Passing an unknown rule id fails the scan with exit code `2`, so a typo in
 `--skip-rule` can never silently disable detection.
 
+A secret-like value that only appears inside a comment (`#`, `//`, `/* */`,
+`<!-- -->`) is skipped by default — the same value in executable code is
+still reported. Pass `--include-comments` to report commented-out secrets
+too.
+
 ### Configuration file (`secret-guard.json`)
 
 Prefer a checked-in configuration over repeating flags in CI. secret-guard
@@ -222,6 +231,7 @@ discovers `secret-guard.json` in the scanned directory or any parent directory:
 {
   "exclude": ["tests", ".venv"],
   "no_entropy": false,
+  "include_comments": false,
   "skip_rules": ["generic-secret-key"],
   "only_rules": [],
   "rules": [],

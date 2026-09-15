@@ -216,5 +216,56 @@ class CustomRuleScannerTest(unittest.TestCase):
         self.assertFalse(has_rule(scanner.scan(), "Acme Token"))
 
 
+class CommentSkippingTest(ScannerTest):
+    def test_hash_comment_secret_not_reported_by_default(self):
+        self.write("secret.py", f"# TOKEN = {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_same_token_in_code_still_reported(self):
+        self.write(
+            "secret.py", f"# old: TOKEN = {TOKEN}\nTOKEN = '{TOKEN}'\n"
+        )
+        scanner = self.make_scanner(include_entropy=False)
+        findings = scanner.scan()
+        code_line = 2
+        self.assertTrue(findings)
+        self.assertTrue(all(f["line"] == code_line for f in findings))
+
+    def test_include_comments_reports_commented_secret(self):
+        self.write("secret.py", f"# TOKEN = {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False, skip_comments=False)
+        self.assertEqual(len(scanner.scan()), 1)
+
+    def test_slash_comment_secret_not_reported(self):
+        self.write("secret.js", f"// token = '{TOKEN}'\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_block_comment_secret_not_reported_and_lines_preserved(self):
+        content = (
+            "line1\n"
+            "/*\n"
+            f"token = '{TOKEN}'\n"
+            "*/\n"
+            f"real = '{TOKEN}'\n"
+        )
+        self.write("secret.js", content)
+        scanner = self.make_scanner(include_entropy=False)
+        findings = scanner.scan()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["line"], 5)
+
+    def test_html_comment_secret_not_reported(self):
+        self.write("index.html", f"<!-- {TOKEN} -->\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_unknown_extension_not_stripped(self):
+        self.write("notes.txt", f"# {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(len(scanner.scan()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -78,6 +78,7 @@ KNOWN_CONFIG_KEYS = {
     "baseline",
     "severity",
     "max_findings",
+    "include_comments",
 }
 
 
@@ -130,6 +131,12 @@ def load_config(config_path):
         _config_fatal(
             f"Error: 'no_entropy' in {config_path} must be a boolean."
         )
+    if "include_comments" in data and not isinstance(
+        data["include_comments"], bool
+    ):
+        _config_fatal(
+            f"Error: 'include_comments' in {config_path} must be a boolean."
+        )
     _require_list_of(data, "skip_rules", str, "strings", config_path)
     _require_list_of(data, "only_rules", str, "strings", config_path)
     _require_list_of(data, "baseline", dict, "objects", config_path)
@@ -175,6 +182,13 @@ def build_parser():
     scan.add_argument(
         "--no-entropy", action="store_true",
         help="Disable high-entropy string detection.",
+    )
+    scan.add_argument(
+        "--include-comments", action="store_true",
+        help=(
+            "Also report secret-like matches that live only inside a "
+            "comment (default skips them for supported file types)."
+        ),
     )
     out_group = scan.add_mutually_exclusive_group()
     out_group.add_argument(
@@ -379,12 +393,16 @@ def resolve_baseline(args, config):
             sys.exit(2)
     return config.get("baseline", [])
 
-def _scan_stdin(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _scan_stdin(
+    args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     scanner = Scanner(
         ".", excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
         custom_rules=custom_rules,
     )
     scanner.include_entropy = not no_entropy
+    scanner.skip_comments = not include_comments
     text = sys.stdin.read()
     return scanner.scan_text(args.filename, text)
 
@@ -407,19 +425,27 @@ def _scan_staged(exclude, skip_rules, only_rules, custom_rules):
     return findings
 
 
-def _scan_path(path, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _scan_path(
+    path, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     scanner = Scanner(
         path, excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
         custom_rules=custom_rules,
     )
     scanner.include_entropy = not no_entropy
+    scanner.skip_comments = not include_comments
     return scanner.scan()
 
 
-def _run_scan(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _run_scan(
+    args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     if args.stdin:
         return _scan_stdin(
-            args, exclude, skip_rules, only_rules, no_entropy, custom_rules
+            args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+            include_comments,
         )
     if args.staged:
         return _scan_staged(exclude, skip_rules, only_rules, custom_rules)
@@ -427,7 +453,8 @@ def _run_scan(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
     findings = []
     for path in args.paths:
         for finding in _scan_path(
-            path, exclude, skip_rules, only_rules, no_entropy, custom_rules
+            path, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+            include_comments,
         ):
             if multi:
                 finding["path"] = os.path.join(
@@ -525,6 +552,9 @@ def cmd_scan(args):
         skip_rules = config.get("skip_rules", [])
         only_rules = config.get("only_rules", [])
     no_entropy = args.no_entropy or config.get("no_entropy", False)
+    include_comments = args.include_comments or config.get(
+        "include_comments", False
+    )
     severity_threshold = getattr(args, "severity", None) or config.get(
         "severity", "low"
     )
@@ -550,7 +580,8 @@ def cmd_scan(args):
     baseline = resolve_baseline(args, config)
 
     findings = _run_scan(
-        args, exclude, skip_rules, only_rules, no_entropy, custom_rules
+        args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+        include_comments,
     )
 
     findings = filter_baseline(findings, baseline)
@@ -590,6 +621,7 @@ def cmd_init(args):
         ),
         "exclude": [],
         "no_entropy": False,
+        "include_comments": False,
         "skip_rules": [],
         "only_rules": [],
         "rules": [],

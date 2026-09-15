@@ -656,6 +656,52 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("Error: 'max_findings' in", result.stderr)
 
+    def test_scan_skips_secret_in_comment_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)
+
+    def test_scan_still_reports_same_secret_in_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\nTOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_flag_reports_commented_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--include-comments", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_config_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            config_file = Path(tmp, "secret-guard.json")
+            config_file.write_text(
+                json.dumps({"include_comments": True}), encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_config_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp, "secret-guard.json")
+            config_file.write_text(
+                json.dumps({"include_comments": "yes"}), encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Error: 'include_comments' in", result.stderr)
+
     def test_stdin_scan_detects_secret(self):
         result = subprocess.run(
                 [sys.executable, "-m", "secretguard", "scan", "--stdin"],

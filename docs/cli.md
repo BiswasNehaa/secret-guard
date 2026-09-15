@@ -20,6 +20,7 @@ secret-guard scan [path] [options]
 | `path` | Path to scan (default: `.`) |
 | `--exclude DIR` | Skip additional directory names (repeatable) |
 | `--no-entropy` | Disable high-entropy string detection |
+| `--include-comments` | Also report secret-like matches that live only inside a comment (default skips them) |
 | `--json` | Output findings as JSON |
 | `--csv` | Output findings as CSV |
 | `--summary` | Print only the severity summary instead of the full report |
@@ -97,6 +98,18 @@ raw values.
 - If the sum of prefix and suffix reveal lengths is greater than or equal to the secret length, the secret is completely masked to prevent accidental leakage of the full secret value.
 - `--show-value` always takes precedence and will print the full unmasked secret value, ignoring these flags.
 
+### `--include-comments`
+
+By default, a secret-like match that falls entirely inside a comment (a
+`#`/`//` line comment, a `/* */` or `<!-- -->` block) is not reported — the
+same value written in executable code elsewhere in the file still is, since
+only the comment's own text is excluded. Comment syntax is inferred from the
+file extension; a file type this doesn't recognize gets no special
+treatment (nothing is skipped there).
+
+Pass `--include-comments` (or set `"include_comments": true` in
+`secret-guard.json`) to report secrets inside comments too.
+
 ### `--exclude`
 
 Directory names to skip, in addition to the built-in defaults
@@ -141,6 +154,7 @@ parent, then merges it with flags (flags win):
 | --- | --- | --- |
 | `exclude` | list[str] | Extra directory names to skip |
 | `no_entropy` | bool | Disable entropy detection |
+| `include_comments` | bool | Report secrets found only inside comments (default: `false`) |
 | `skip_rules` | list[str] | Rule ids to skip |
 | `only_rules` | list[str] | Rule ids to run exclusively |
 | `baseline` | list[object] | Baseline entries (see above) |
