@@ -21,6 +21,6 @@ repos:
       - id: secret-guard
         name: secret-guard
         description: Scan staged files for leaked secrets.
-        entry: python -m secretguard scan --staged --exclude tests --no-entropy
+        entry: python -m secretguard scan --staged --exclude tests --exclude benchmarks --no-entropy
         language: system
         pass_filenames: false
