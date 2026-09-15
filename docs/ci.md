@@ -11,6 +11,37 @@ Use the exit code to fail a pipeline the moment a secret appears.
     secret-guard scan . --json --exclude tests --exclude .venv
 ```
 
+## GitLab CI
+
+```yaml
+secret-scan:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install secret-guard-scan
+    - secret-guard scan . --json --exclude tests --exclude .venv
+```
+
+The job fails the pipeline automatically: `secret-guard` exits `1` when it
+finds a secret and `0` when the scan is clean, which GitLab CI treats as a
+failed/passed job respectively.
+
+## Azure Pipelines
+
+```yaml
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.x"
+  - script: |
+      pip install secret-guard-scan
+      secret-guard scan . --json --exclude tests --exclude .venv
+    displayName: "Scan for secrets"
+```
+
+As with GitLab, no extra flags are needed to fail the build — Azure Pipelines
+fails the step (and the pipeline) whenever a script step exits non-zero.
+
 ## Git pre-commit hook
 
 ```bash
