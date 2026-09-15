@@ -1,12 +1,16 @@
-"""Console, JSON, CSV, XML, and HTML reporting for findings."""
+"""Console, JSON, CSV, XML, HTML, and SARIF reporting for findings."""
 
 import csv
+import hashlib
 import html
 import io
 import json
 import os
 import sys
 import xml.etree.ElementTree as ET
+
+from . import __version__
+from .rules import RULES, SPECIAL_RULES
 
 SEVERITY_COLORS = {
     "critical": "\033[31;1m",  # bright red
@@ -435,3 +439,136 @@ def format_html(
         truncation_note=truncation_note,
         rows="\n".join(rows),
     )
+
+
+SARIF_SCHEMA_URI = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/"
+    "sarif-schema-2.1.0.json"
+)
+SARIF_VERSION = "2.1.0"
+SARIF_SEVERITY = {
+    "critical": {"level": "error", "security-severity": "9.5"},
+    "high": {"level": "error", "security-severity": "7.5"},
+    "medium": {"level": "warning", "security-severity": "5.0"},
+    "low": {"level": "note", "security-severity": "2.0"},
+}
+
+
+def _rule_catalog():
+    """Map every known rule id to its generic {name, severity, description}.
+
+    Built-ins come from RULES/SPECIAL_RULES; a rule id outside that (a
+    custom rule) falls back to the reporting finding's own fields.
+    """
+
+    catalog = {rule["id"]: rule for rule in RULES}
+    catalog.update(SPECIAL_RULES)
+    return catalog
+
+
+def format_sarif(
+    findings,
+    root,
+    show_value=False,
+    truncated=False,
+    total_findings=None,
+    reveal_prefix=None,
+    reveal_suffix=None,
+):
+    """Render findings as a SARIF 2.1.0 log for GitHub Code Scanning.
+
+    Secret values are always masked here, regardless of show_value —
+    SARIF logs are meant to be uploaded and retained by Code Scanning, so
+    raw secret material must never end up in one. A finding that opts in to
+    ``reveal`` (a dotenv variable name, never the secret's actual value) is
+    shown as-is, matching the other reporters. A one-way hash of the raw
+    value is included as a fingerprint so the same secret can be tracked
+    across scans without exposing it.
+    """
+
+    ordered = sorted(findings, key=lambda f: (f["path"], f["line"], f["rule"]))
+    catalog = _rule_catalog()
+
+    rule_order = []
+    rule_defs = {}
+    for finding in ordered:
+        rule_id = finding["rule_id"]
+        if rule_id in rule_defs:
+            continue
+        meta = catalog.get(
+            rule_id,
+            {
+                "name": finding["rule"],
+                "severity": finding["severity"],
+                "description": finding["description"],
+            },
+        )
+        sev = SARIF_SEVERITY.get(meta["severity"], SARIF_SEVERITY["medium"])
+        rule_order.append(rule_id)
+        rule_defs[rule_id] = {
+            "id": rule_id,
+            "name": meta["name"],
+            "shortDescription": {"text": meta["name"]},
+            "fullDescription": {"text": meta["description"]},
+            "defaultConfiguration": {"level": sev["level"]},
+            "properties": {
+                "security-severity": sev["security-severity"],
+                "tags": ["security", "secrets"],
+            },
+        }
+    rule_index = {rule_id: i for i, rule_id in enumerate(rule_order)}
+
+    results = []
+    for finding in ordered:
+        rule_id = finding["rule_id"]
+        sev = SARIF_SEVERITY.get(finding["severity"], SARIF_SEVERITY["medium"])
+        value = _masked_value(finding, False, reveal_prefix, reveal_suffix)
+        results.append(
+            {
+                "ruleId": rule_id,
+                "ruleIndex": rule_index[rule_id],
+                "level": sev["level"],
+                "message": {
+                    "text": "{}: {}".format(finding["rule"], value),
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": finding["path"].replace(os.sep, "/"),
+                            },
+                            "region": {"startLine": finding["line"]},
+                        }
+                    }
+                ],
+                "partialFingerprints": {
+                    "secretGuardValueHash/v1": hashlib.sha256(
+                        finding["value"].encode("utf-8")
+                    ).hexdigest(),
+                },
+            }
+        )
+
+    run = {
+        "tool": {
+            "driver": {
+                "name": "secret-guard",
+                "informationUri": "https://github.com/taksh1507/secret-guard",
+                "version": __version__,
+                "rules": [rule_defs[rule_id] for rule_id in rule_order],
+            }
+        },
+        "results": results,
+    }
+    if truncated:
+        run["properties"] = {
+            "truncated": True,
+            "total_findings": total_findings,
+        }
+
+    sarif = {
+        "$schema": SARIF_SCHEMA_URI,
+        "version": SARIF_VERSION,
+        "runs": [run],
+    }
+    return json.dumps(sarif, indent=2)

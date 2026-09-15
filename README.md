@@ -175,8 +175,11 @@ options:
                       detailed report
   --xml               Output findings as a JUnit-style XML report
   --html              Output findings as a self-contained HTML report
-  --format FMT        Output format: text, json, csv, summary, xml, or html
-                      (aliases: --json, --csv, --summary, --xml, --html)
+  --sarif             Output a SARIF 2.1.0 report for GitHub Code Scanning
+                      (secret values are always masked)
+  --format FMT        Output format: text, json, csv, summary, xml, html, or
+                      sarif (aliases: --json, --csv, --summary, --xml,
+                      --html, --sarif)
   --show-value        Print full secret values (default masks them)
   --no-color          Disable colored console output
   --quiet             Suppress all scan output; only the exit code is set

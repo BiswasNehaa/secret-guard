@@ -253,6 +253,41 @@ class CliTest(unittest.TestCase):
             self.assertTrue(result.stdout.lstrip().startswith("<!DOCTYPE html>"))
             self.assertNotIn(SECRET, result.stdout)
 
+    def test_scan_sarif_emits_valid_sarif(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", ".")
+            self.assertEqual(result.returncode, 1)
+            doc = json.loads(result.stdout)
+            self.assertEqual(doc["version"], "2.1.0")
+            results = doc["runs"][0]["results"]
+            self.assertGreaterEqual(len(results), 1)
+            self.assertNotIn(SECRET, result.stdout)
+
+    def test_scan_sarif_ignores_show_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", "--show-value", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn(SECRET, result.stdout)
+            json.loads(result.stdout)
+
+    def test_scan_sarif_locations_reference_file_and_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"\nTOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", ".")
+            doc = json.loads(result.stdout)
+            location = doc["runs"][0]["results"][0]["locations"][0]
+            physical = location["physicalLocation"]
+            self.assertEqual(physical["artifactLocation"]["uri"], "secret.py")
+            self.assertEqual(physical["region"]["startLine"], 2)
+
     def test_scan_format_flag_selects_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "main.py").write_text("print('clean')\n", encoding="utf-8")
@@ -261,6 +296,9 @@ class CliTest(unittest.TestCase):
             ET.fromstring(xml.stdout)
             html = self.run_cli(tmp, "scan", "--format", "html", ".")
             self.assertTrue(html.stdout.lstrip().startswith("<!DOCTYPE html>"))
+            sarif = self.run_cli(tmp, "scan", "--format", "sarif", ".")
+            self.assertEqual(sarif.returncode, 0)
+            self.assertEqual(json.loads(sarif.stdout)["runs"][0]["results"], [])
             text = self.run_cli(tmp, "scan", "--format", "text", ".")
             self.assertIn("0 total", text.stdout)
 

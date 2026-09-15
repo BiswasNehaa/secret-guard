@@ -13,6 +13,7 @@ from .reporter import (
     format_csv,
     format_html,
     format_json,
+    format_sarif,
     format_summary,
     format_xml,
 )
@@ -196,10 +197,18 @@ def build_parser():
         help="Output a self-contained HTML report instead of a console report.",
     )
     out_group.add_argument(
-        "--format", choices=("text", "json", "csv", "summary", "xml", "html"),
+        "--sarif", action="store_true",
+        help=(
+            "Output a SARIF 2.1.0 report instead of a console report, for "
+            "GitHub Code Scanning. Secret values are always masked."
+        ),
+    )
+    out_group.add_argument(
+        "--format",
+        choices=("text", "json", "csv", "summary", "xml", "html", "sarif"),
         default=None, metavar="FMT",
-        help="Output format: text, json, csv, summary, xml, or html "
-             "(aliases: --json, --csv, --summary, --xml, --html).",
+        help="Output format: text, json, csv, summary, xml, html, or sarif "
+             "(aliases: --json, --csv, --summary, --xml, --html, --sarif).",
     )
     scan.add_argument(
         "--show-value", action="store_true",
@@ -475,7 +484,7 @@ def _output_format(args):
 
     if args.format is not None:
         return args.format
-    for flag in ("json", "csv", "summary", "xml", "html"):
+    for flag in ("json", "csv", "summary", "xml", "html", "sarif"):
         if getattr(args, flag, False):
             return flag
     return "text"
@@ -505,6 +514,8 @@ def _render_output(args, findings, shown, root, truncated):
         print(format_xml(shown, root, **kwargs))
     elif out_format == "html":
         print(format_html(shown, root, **kwargs))
+    elif out_format == "sarif":
+        print(format_sarif(shown, root, **kwargs))
     else:
         print(format_console(shown, root, color=color, **kwargs))
 
