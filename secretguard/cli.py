@@ -390,6 +390,13 @@ def build_parser():
         help="Disable high-entropy string detection.",
     )
     baseline.add_argument(
+        "--include-comments", action="store_true",
+        help=(
+            "Also report secret-like matches that live only inside a "
+            "comment (default skips them for supported file types)."
+        ),
+    )
+    baseline.add_argument(
         "--skip-rule", action="append", default=[], metavar="RULE",
         help="Never run the given rule id (repeatable). Mixes with --only-rule.",
     )
@@ -776,6 +783,9 @@ def cmd_baseline(args):
         skip_rules = config.get("skip_rules", [])
         only_rules = config.get("only_rules", [])
     no_entropy = args.no_entropy or config.get("no_entropy", False)
+    include_comments = args.include_comments or config.get(
+        "include_comments", False
+    )
 
     custom_rules = _load_custom_rules(args, config, config_file)
 
@@ -796,7 +806,8 @@ def cmd_baseline(args):
     findings = []
     for path in args.paths:
         for finding in _scan_path(
-            path, exclude, skip_rules, only_rules, no_entropy, custom_rules
+            path, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+            include_comments,
         ):
             if multi:
                 finding["path"] = os.path.join(
