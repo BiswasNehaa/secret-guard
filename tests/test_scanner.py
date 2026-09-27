@@ -151,6 +151,43 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(line_number("a\nb\nc", 0), 1)
         self.assertEqual(line_number("a\nb\nc", 4), 3)
 
+    def test_pragma_ignore_suppresses_finding_on_that_line(self):
+        self.write("secret.py", f"token = {TOKEN}  # secret-guard:ignore\n")
+        self.assertEqual(self.make_scanner().scan(), [])
+
+    def test_pragma_ignore_does_not_affect_other_lines(self):
+        self.write(
+            "secret.py",
+            f"token = {TOKEN}  # secret-guard:ignore\n"
+            f"other = {TOKEN}\n",
+        )
+        findings = self.make_scanner().scan()
+        lines = {f["line"] for f in findings}
+        self.assertEqual(lines, {2})
+        self.assertTrue(has_rule(findings, "GitHub Token"))
+
+    def test_pragma_ignore_scoped_to_rule_id_suppresses_only_that_rule(self):
+        self.write(
+            "secret.py",
+            "aws = AKIAIOSFODNN7EXAMPLE  # secret-guard:ignore github-token\n",
+        )
+        findings = self.make_scanner().scan()
+        self.assertTrue(has_rule(findings, "AWS Access Key ID"))
+
+    def test_pragma_ignore_scoped_to_rule_id_leaves_other_rules_on_same_line(self):
+        # A high-entropy AWS-style string would also trip the entropy rule;
+        # scoping the pragma to github-token must not suppress that finding.
+        self.write(
+            "secret.py",
+            f"token = {TOKEN}  # secret-guard:ignore github-token\n",
+        )
+        findings = self.make_scanner().scan()
+        self.assertFalse(has_rule(findings, "GitHub Token"))
+
+    def test_pragma_ignore_slash_slash_comment(self):
+        self.write("secret.js", f"const token = '{TOKEN}'; // secret-guard:ignore\n")
+        self.assertEqual(self.make_scanner().scan(), [])
+
 
 class CustomRuleScannerTest(unittest.TestCase):
     def setUp(self):
@@ -214,6 +251,57 @@ class CustomRuleScannerTest(unittest.TestCase):
             skip_rules=["acme-token"], include_entropy=False
         )
         self.assertFalse(has_rule(scanner.scan(), "Acme Token"))
+
+
+class CommentSkippingTest(ScannerTest):
+    def test_hash_comment_secret_not_reported_by_default(self):
+        self.write("secret.py", f"# TOKEN = {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_same_token_in_code_still_reported(self):
+        self.write(
+            "secret.py", f"# old: TOKEN = {TOKEN}\nTOKEN = '{TOKEN}'\n"
+        )
+        scanner = self.make_scanner(include_entropy=False)
+        findings = scanner.scan()
+        code_line = 2
+        self.assertTrue(findings)
+        self.assertTrue(all(f["line"] == code_line for f in findings))
+
+    def test_include_comments_reports_commented_secret(self):
+        self.write("secret.py", f"# TOKEN = {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False, skip_comments=False)
+        self.assertEqual(len(scanner.scan()), 1)
+
+    def test_slash_comment_secret_not_reported(self):
+        self.write("secret.js", f"// token = '{TOKEN}'\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_block_comment_secret_not_reported_and_lines_preserved(self):
+        content = (
+            "line1\n"
+            "/*\n"
+            f"token = '{TOKEN}'\n"
+            "*/\n"
+            f"real = '{TOKEN}'\n"
+        )
+        self.write("secret.js", content)
+        scanner = self.make_scanner(include_entropy=False)
+        findings = scanner.scan()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["line"], 5)
+
+    def test_html_comment_secret_not_reported(self):
+        self.write("index.html", f"<!-- {TOKEN} -->\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(scanner.scan(), [])
+
+    def test_unknown_extension_not_stripped(self):
+        self.write("notes.txt", f"# {TOKEN}\n")
+        scanner = self.make_scanner(include_entropy=False)
+        self.assertEqual(len(scanner.scan()), 1)
 
 
 if __name__ == "__main__":
