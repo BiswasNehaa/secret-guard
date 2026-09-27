@@ -12,6 +12,7 @@ from secretguard.reporter import (
     format_csv,
     format_html,
     format_json,
+    format_sarif,
     format_summary,
     format_xml,
     mask,
@@ -438,6 +439,88 @@ class FormatHtmlTest(unittest.TestCase):
         findings = [finding(severity="critical"), finding(severity="low")]
         text = format_html(findings, ".")
         self.assertIn("1 critical, 0 high, 0 medium, 1 low", text)
+
+
+class FormatSarifTest(unittest.TestCase):
+    def _load(self, findings, **kwargs):
+        return json.loads(format_sarif(findings, ".", **kwargs))
+
+    def test_valid_sarif_envelope(self):
+        doc = self._load([])
+        self.assertEqual(doc["version"], "2.1.0")
+        self.assertIn("sarif-schema-2.1.0.json", doc["$schema"])
+        self.assertEqual(len(doc["runs"]), 1)
+        run = doc["runs"][0]
+        self.assertEqual(run["tool"]["driver"]["name"], "secret-guard")
+        self.assertEqual(run["results"], [])
+
+    def test_one_result_per_finding(self):
+        doc = self._load([finding(), finding(severity="low")])
+        self.assertEqual(len(doc["runs"][0]["results"]), 2)
+
+    def test_result_fields_map_to_finding(self):
+        f = finding(path="a.py", line=7, severity="high", rule="GitHub Token")
+        doc = self._load([f])
+        result = doc["runs"][0]["results"][0]
+        self.assertEqual(result["ruleId"], "github-token")
+        self.assertEqual(result["level"], "error")
+        location = result["locations"][0]["physicalLocation"]
+        self.assertEqual(location["artifactLocation"]["uri"], "a.py")
+        self.assertEqual(location["region"]["startLine"], 7)
+        self.assertIn("GitHub Token", result["message"]["text"])
+
+    def test_rules_deduplicated_and_use_catalog_description(self):
+        f = finding(rule="GitHub Token", value="ghp_one")
+        g = finding(rule="GitHub Token", value="ghp_two", line=2)
+        doc = self._load([f, g])
+        rules = doc["runs"][0]["tool"]["driver"]["rules"]
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0]["id"], "github-token")
+        # The finding-level "test" description is a fixture placeholder;
+        # the rule entry should carry the real catalog description instead.
+        self.assertEqual(
+            rules[0]["fullDescription"]["text"],
+            "GitHub Personal Access / OAuth token.",
+        )
+        self.assertIn("security-severity", rules[0]["properties"])
+
+    def test_values_always_masked_even_with_show_value(self):
+        value = "ghp_secretvalue123"
+        doc = self._load([finding(value=value)], show_value=True)
+        text = json.dumps(doc)
+        self.assertNotIn(value, text)
+        self.assertNotIn("secretvalue", text)
+
+    def test_no_raw_value_anywhere_in_output(self):
+        value = "super-secret-raw-value"
+        doc = self._load([finding(value=value)], show_value=True)
+        self.assertNotIn(value, json.dumps(doc))
+
+    def test_fingerprint_hash_present_and_stable(self):
+        f = finding(value="same-secret")
+        g = finding(value="same-secret", line=2)
+        doc = self._load([f, g])
+        results = doc["runs"][0]["results"]
+        hash_a = results[0]["partialFingerprints"]["secretGuardValueHash/v1"]
+        hash_b = results[1]["partialFingerprints"]["secretGuardValueHash/v1"]
+        self.assertEqual(hash_a, hash_b)
+        self.assertEqual(len(hash_a), 64)
+
+    def test_truncated_reports_totals(self):
+        doc = self._load([finding()], truncated=True, total_findings=5)
+        run = doc["runs"][0]
+        self.assertTrue(run["properties"]["truncated"])
+        self.assertEqual(run["properties"]["total_findings"], 5)
+
+    def test_severity_maps_to_sarif_level(self):
+        levels = {}
+        for severity in ("critical", "high", "medium", "low"):
+            doc = self._load([finding(severity=severity)])
+            levels[severity] = doc["runs"][0]["results"][0]["level"]
+        self.assertEqual(levels["critical"], "error")
+        self.assertEqual(levels["high"], "error")
+        self.assertEqual(levels["medium"], "warning")
+        self.assertEqual(levels["low"], "note")
 
 
 if __name__ == "__main__":
