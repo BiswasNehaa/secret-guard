@@ -144,6 +144,27 @@ Rule ids are stable slugs (e.g. `github-token`, `aws-access-key-id`,
 Unknown rule ids abort the scan with exit code `2` so a typo can never
 silently disable a rule.
 
+### Inline allowlist pragmas
+
+A line carrying a `secret-guard:ignore` comment is excluded from the report,
+regardless of the comment style (`#`, `//`, or any other prefix — the pragma
+is matched anywhere on the line):
+
+```python
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # secret-guard:ignore
+```
+
+Scope it to specific rule ids (comma-separated) to suppress only those rules
+on that line, leaving any other finding on the same line intact:
+
+```python
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # secret-guard:ignore github-token
+```
+
+Unlike `--skip-rule` (disables a rule everywhere) or `--baseline` (suppresses
+by path + rule id, from outside the source), a pragma is a one-line, in-source
+allowlist reviewable in the same diff as the secret it exempts.
+
 ### `--baseline`
 
 A baseline acknowledges known findings so CI stays green while new leaks
@@ -176,3 +197,26 @@ parent, then merges it with flags (flags win):
 
 Unknown keys, wrong types, or malformed JSON abort the scan with exit code
 `2` and an error on stderr; unknown keys warn on stderr without failing.
+
+### Configuration in `pyproject.toml`
+
+As an alternative to a standalone `secret-guard.json`, the same keys can live
+under `[tool.secret-guard]` in `pyproject.toml`:
+
+```toml
+[tool.secret-guard]
+exclude = ["wip"]
+no_entropy = true
+skip_rules = ["generic-secret-key"]
+```
+
+Discovery walks upward the same way as `secret-guard.json`. If a directory in
+that walk has an explicit `secret-guard.json` anywhere, it wins over any
+`pyproject.toml`; otherwise the closest `pyproject.toml` with a
+`[tool.secret-guard]` table is used. A `pyproject.toml` with no such table is
+ignored, so unrelated Python projects are unaffected. The same key validation
+and exit-code-`2` behavior applies to values under `[tool.secret-guard]`.
+
+Reading `pyproject.toml` uses the standard-library `tomllib` (Python 3.11+);
+on older Pythons it falls back to the `tomli` package if installed, and is
+otherwise skipped — `secret-guard.json` remains fully supported everywhere.

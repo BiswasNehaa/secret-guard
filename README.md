@@ -49,8 +49,9 @@ value.
 - **gitignore-aware** — skips `.git`, `node_modules`, `venv`, and anything your
   `.gitignore` already covers; repeatable `--exclude` handles the rest.
 - **Entropy detection** — flags high-entropy strings even when no rule matches.
-- **Configurable** — command-line flags, a checked-in `secret-guard.json`
-  config, custom rule manifests, baselines, and severity thresholds.
+- **Configurable** — command-line flags, a checked-in `secret-guard.json` (or
+  `[tool.secret-guard]` in `pyproject.toml`) config, custom rule manifests,
+  baselines, and severity thresholds.
 - **Fast, single-file deployment** — works in CI with a single `pip install`.
 
 ## Installation
@@ -239,6 +240,19 @@ Command-line flags override configuration values. Scaffold a starter file with:
 secret-guard init
 ```
 
+The same keys can instead live under `[tool.secret-guard]` in `pyproject.toml`,
+for projects that would rather not add another config file:
+
+```toml
+[tool.secret-guard]
+exclude = ["tests", ".venv"]
+skip_rules = ["generic-secret-key"]
+```
+
+Precedence is flags > `secret-guard.json` > `pyproject.toml`; a project with
+both uses `secret-guard.json`. See
+[docs/cli.md](docs/cli.md#configuration-in-pyprojecttoml) for details.
+
 ### Custom rule manifests
 
 Teams can register their own regex detections without forking the project. A
@@ -290,6 +304,18 @@ A `path` and `rule_id` pair suppresses all matching findings; an optional
 with `--baseline baseline.json` or through the `baseline` key of
 `secret-guard.json`. Scanned values are hashed client-side, so the baseline
 never needs to contain the secret itself.
+
+For a one-off, reviewable-in-the-same-diff exemption, add a
+`secret-guard:ignore` pragma to the end of the line instead:
+
+```python
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # secret-guard:ignore
+```
+
+Scope it to specific rules with a comma-separated list of rule ids
+(`# secret-guard:ignore github-token`) to leave other findings on the same
+line intact. See [docs/cli.md](docs/cli.md#inline-allowlist-pragmas) for
+details.
 
 ### Severity and exit codes
 
