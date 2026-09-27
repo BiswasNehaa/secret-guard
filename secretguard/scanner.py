@@ -1,6 +1,7 @@
 """Filesystem scanning with gitignore-aware filtering."""
 
 import os
+import re
 
 try:
     import pathspec
@@ -34,6 +35,37 @@ DEFAULT_EXCLUDES = frozenset({
 })
 
 Finding = dict
+
+# Matches an inline allowlist pragma such as `# secret-guard:ignore` or
+# `// secret-guard:ignore github-token`, regardless of comment style, so it
+# works across languages without per-language comment parsing. An optional
+# comma/space-separated list of rule ids scopes the suppression to just those
+# rules; with no rule ids every finding on the line is suppressed.
+PRAGMA_RE = re.compile(r"secret-guard:ignore(?:[ \t]+([\w][\w,-]*))?")
+
+
+def pragma_ignores(text):
+    """Map line number -> ignored rule ids (None means "all") for lines
+    carrying a secret-guard:ignore pragma."""
+
+    ignores = {}
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        match = PRAGMA_RE.search(line)
+        if not match:
+            continue
+        rule_ids = match.group(1)
+        if rule_ids:
+            ignores[line_no] = {r for r in rule_ids.split(",") if r}
+        else:
+            ignores[line_no] = None
+    return ignores
+
+
+def _pragma_suppressed(finding, ignores):
+    if finding["line"] not in ignores:
+        return False
+    rule_ids = ignores[finding["line"]]
+    return rule_ids is None or finding["rule_id"] in rule_ids
 
 
 class Scanner:
@@ -186,6 +218,10 @@ class Scanner:
                         f"Detected via Shannon entropy ({entropy:.2f} bits/char).",
                     )
                 )
+
+        ignores = pragma_ignores(text)
+        if ignores:
+            findings = [f for f in findings if not _pragma_suppressed(f, ignores)]
         return findings
 
     @staticmethod
