@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover - optional dependency
     pathspec = None
     HAS_PATHSPEC = False
 
+from .comments import comment_index
 from .rules import (
     DOTENV_RULE_ID,
     ENTROPY_RULE_ID,
@@ -77,6 +78,7 @@ class Scanner:
         skip_rules=None,
         only_rules=None,
         custom_rules=None,
+        skip_comments=True,
     ):
         self.root = os.path.abspath(root)
         self.extra_excludes = set(excludes or [])
@@ -84,6 +86,7 @@ class Scanner:
         self.skip_rules = set(skip_rules or [])
         self.only_rules = set(only_rules or []) or None
         self.custom_rules = list(custom_rules or [])
+        self.skip_comments = skip_comments
         self._exclusions = DEFAULT_EXCLUDES | self.extra_excludes
         self._spec = None
         self._load_gitignore()
@@ -165,10 +168,19 @@ class Scanner:
 
         Dotenv files are special-cased: secret-looking key assignments are
         reported by key name only, so the underlying value is never echoed.
+
+        Unless skip_comments is False, a regex/entropy match that falls
+        entirely inside a comment (per the file's extension) is not
+        reported; the same value elsewhere in executable code still is.
         """
 
         findings = []
         key_lines = set()
+        comments = (
+            comment_index(text, rel_path)
+            if self.skip_comments
+            else None
+        )
         if self._rule_enabled(DOTENV_RULE_ID) and is_dotenv_path(rel_path):
             base = os.path.basename(rel_path)
             for line_no, key, _value in dotenv_secret_assignments(text):
@@ -192,6 +204,8 @@ class Scanner:
             line = line_number(text, match.start())
             if line in key_lines:
                 continue
+            if comments and match.start() in comments:
+                continue
             findings.append(
                 self._make_finding(
                     rel_path,
@@ -207,6 +221,8 @@ class Scanner:
             for start, _end, entropy, value in entropy_candidates(text):
                 line = line_number(text, start)
                 if line in key_lines:
+                    continue
+                if comments and start in comments:
                     continue
                 findings.append(
                     self._make_finding(
