@@ -7,6 +7,14 @@ import os
 import subprocess
 import sys
 
+try:
+    import tomllib
+except ImportError:  # pragma: no cover - Python < 3.11
+    try:
+        import tomli as tomllib
+    except ImportError:  # pragma: no cover - optional dependency
+        tomllib = None
+
 from . import __version__
 from .reporter import (
     format_console,
@@ -50,24 +58,55 @@ def install_hook(target=".git/hooks/pre-commit"):
     return 0
 
 
-def find_config(start_path):
-    """Search upwards from start_path for secret-guard.json."""
+def _dirs_upwards(start_path):
+    """Yield start_path and every parent directory, closest first."""
 
     curr = os.path.abspath(start_path)
     if os.path.isfile(curr):
         curr = os.path.dirname(curr)
     while True:
-        config_file = os.path.join(curr, CONFIG_FILENAME)
-        if os.path.isfile(config_file):
-            return config_file
+        yield curr
         parent = os.path.dirname(curr)
         if parent == curr:
-            break
+            return
         curr = parent
+
+
+def _pyproject_declares_config(path):
+    """Whether pyproject.toml at path has a non-empty [tool.secret-guard]."""
+
+    if tomllib is None:
+        return False
+    try:
+        with open(path, "rb") as f:
+            document = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return isinstance(document.get("tool", {}).get("secret-guard"), dict)
+
+
+def find_config(start_path):
+    """Search upwards from start_path for secret-guard.json, falling back to
+    a [tool.secret-guard] table in pyproject.toml.
+
+    An explicit secret-guard.json anywhere in the search path takes
+    precedence over any pyproject.toml.
+    """
+
+    dirs = list(_dirs_upwards(start_path))
+    for d in dirs:
+        candidate = os.path.join(d, CONFIG_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+    for d in dirs:
+        candidate = os.path.join(d, PYPROJECT_FILENAME)
+        if os.path.isfile(candidate) and _pyproject_declares_config(candidate):
+            return candidate
     return None
 
 
 CONFIG_FILENAME = "secret-guard.json"
+PYPROJECT_FILENAME = "pyproject.toml"
 KNOWN_CONFIG_KEYS = {
     "//",
     "exclude",
@@ -100,21 +139,38 @@ def _require_list_of(data, key, expected_type, kind, config_path):
         )
 
 
-def load_config(config_path):
-    """Load and validate secret-guard.json."""
+def _load_pyproject_table(config_path):
+    """Return the [tool.secret-guard] table of a pyproject.toml file."""
 
     try:
-        with open(config_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
+        with open(config_path, "rb") as f:
+            document = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
         _config_fatal(f"Error parsing {config_path}: {e}")
     except OSError as e:
         _config_fatal(f"Error reading {config_path}: {e}")
+    return document.get("tool", {}).get("secret-guard", {})
+
+
+def load_config(config_path):
+    """Load and validate secret-guard.json, or the [tool.secret-guard] table
+    of pyproject.toml."""
+
+    if os.path.basename(config_path) == PYPROJECT_FILENAME:
+        data = _load_pyproject_table(config_path)
+    else:
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            _config_fatal(f"Error parsing {config_path}: {e}")
+        except OSError as e:
+            _config_fatal(f"Error reading {config_path}: {e}")
 
     if not isinstance(data, dict):
         _config_fatal(
-            "Error: configuration root in "
-            f"{config_path} must be a JSON object."
+            "Error: configuration in "
+            f"{config_path} must be an object/table."
         )
 
     for key in data:
