@@ -49,8 +49,9 @@ value.
 - **gitignore-aware** — skips `.git`, `node_modules`, `venv`, and anything your
   `.gitignore` already covers; repeatable `--exclude` handles the rest.
 - **Entropy detection** — flags high-entropy strings even when no rule matches.
-- **Configurable** — command-line flags, a checked-in `secret-guard.json`
-  config, custom rule manifests, baselines, and severity thresholds.
+- **Configurable** — command-line flags, a checked-in `secret-guard.json` (or
+  `[tool.secret-guard]` in `pyproject.toml`) config, custom rule manifests,
+  baselines, and severity thresholds.
 - **Fast, single-file deployment** — works in CI with a single `pip install`.
 
 ## Installation
@@ -127,6 +128,7 @@ by the action itself.
 | `exclude` | *(empty)* | Directory names to skip, one per line |
 | `json` | `false` | Emit findings as JSON (values still masked) |
 | `no-entropy` | `false` | Disable high-entropy string detection |
+| `comment-on-fail` | `false` | Post a masked summary as a pull request comment when the scan fails |
 
 Add it to an existing workflow:
 
@@ -141,6 +143,32 @@ steps:
         tests
         .venv
 ```
+
+### Commenting on the pull request
+
+Set `comment-on-fail: true` to have a failing scan post its masked findings as
+a PR comment, in addition to failing the job. The calling workflow needs to
+grant comment-write access:
+
+```yaml
+permissions:
+  pull-requests: write
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: taksh1507/secret-guard@v1
+    with:
+      comment-on-fail: true
+```
+
+- The comment is **updated in place** on later runs of the same PR rather
+  than duplicated.
+- On a **forked** pull request, the default `GITHUB_TOKEN` has no write
+  access; commenting is automatically skipped there (the scan still fails
+  the job normally), so this is safe to enable even for a public repo that
+  accepts contributions from forks.
+- Commenting never affects the pass/fail result — a permissions problem
+  or API error while posting is swallowed rather than breaking the job.
 
 ## Docker
 
@@ -169,14 +197,19 @@ positional arguments:
 options:
   --exclude DIR       Additional directory names to skip (repeatable)
   --no-entropy        Disable high-entropy string detection
+  --include-comments  Also report secrets found only inside a comment
+                      (default skips them)
   --json              Output findings as JSON
   --csv               Output findings as CSV
   --summary           Print only the severity summary instead of the
                       detailed report
   --xml               Output findings as a JUnit-style XML report
   --html              Output findings as a self-contained HTML report
-  --format FMT        Output format: text, json, csv, summary, xml, or html
-                      (aliases: --json, --csv, --summary, --xml, --html)
+  --sarif             Output a SARIF 2.1.0 report for GitHub Code Scanning
+                      (secret values are always masked)
+  --format FMT        Output format: text, json, csv, summary, xml, html, or
+                      sarif (aliases: --json, --csv, --summary, --xml,
+                      --html, --sarif)
   --show-value        Print full secret values (default masks them)
   --no-color          Disable colored console output
   --quiet             Suppress all scan output; only the exit code is set
@@ -213,6 +246,11 @@ secret-guard scan --list-rules
 Passing an unknown rule id fails the scan with exit code `2`, so a typo in
 `--skip-rule` can never silently disable detection.
 
+A secret-like value that only appears inside a comment (`#`, `//`, `/* */`,
+`<!-- -->`) is skipped by default — the same value in executable code is
+still reported. Pass `--include-comments` to report commented-out secrets
+too.
+
 ### Configuration file (`secret-guard.json`)
 
 Prefer a checked-in configuration over repeating flags in CI. secret-guard
@@ -222,6 +260,7 @@ discovers `secret-guard.json` in the scanned directory or any parent directory:
 {
   "exclude": ["tests", ".venv"],
   "no_entropy": false,
+  "include_comments": false,
   "skip_rules": ["generic-secret-key"],
   "only_rules": [],
   "rules": [],
@@ -235,6 +274,19 @@ Command-line flags override configuration values. Scaffold a starter file with:
 ```bash
 secret-guard init
 ```
+
+The same keys can instead live under `[tool.secret-guard]` in `pyproject.toml`,
+for projects that would rather not add another config file:
+
+```toml
+[tool.secret-guard]
+exclude = ["tests", ".venv"]
+skip_rules = ["generic-secret-key"]
+```
+
+Precedence is flags > `secret-guard.json` > `pyproject.toml`; a project with
+both uses `secret-guard.json`. See
+[docs/cli.md](docs/cli.md#configuration-in-pyprojecttoml) for details.
 
 ### Custom rule manifests
 
@@ -288,21 +340,6 @@ with `--baseline baseline.json` or through the `baseline` key of
 `secret-guard.json`. Scanned values are hashed client-side, so the baseline
 never needs to contain the secret itself.
 
-Rather than hand-writing one, scaffold a baseline from whatever a scan
-currently finds:
-
-```bash
-secret-guard baseline . --output secret-guard-baseline.json
-secret-guard scan . --baseline secret-guard-baseline.json  # exits 0 now
-```
-
-This is the fastest way to adopt secret-guard on an existing codebase: every
-current finding is baselined in one step, and anything added afterward is
-still caught normally. `secret-guard baseline` accepts the same
-`--exclude`/`--no-entropy`/`--skip-rule`/`--only-rule`/`--rules-path` flags as
-`scan`, so the baseline reflects the same rules a real scan would apply. It
-refuses to overwrite an existing `--output` file unless `--force` is given.
-
 ### Severity and exit codes
 
 - `0` — no secrets found, or all findings are below the `--severity` threshold
@@ -350,12 +387,32 @@ is exactly what would otherwise be committed.
 
 ```bash
 python -m unittest discover -s tests
-python -m ruff check secretguard tests
+python -m ruff check secretguard tests benchmarks
 python -m secretguard scan . --exclude tests --no-entropy
 ```
 
 The repository enforces these in CI (tests on Python 3.9 / 3.11 / 3.13, linting,
-and a self-scan job) and runs GitGuardian on every pull request.
+a benchmark job, and a self-scan job) and runs GitGuardian on every pull request.
+
+## Benchmarks
+
+`benchmarks/` guards scan performance against silent regressions. It generates
+a synthetic, seeded corpus (200 files, one seeded secret per file) and times a
+scan over it:
+
+```bash
+python -m benchmarks.run
+```
+
+This checks the measured throughput against a stored baseline
+(`benchmarks/baseline.json`) and fails if it drops to less than half of that
+baseline — generous enough to absorb normal machine/CI-runner variance while
+still catching a genuine multi-x slowdown. After an intentional, verified
+performance change, update the stored baseline with:
+
+```bash
+python -m benchmarks.run --update-baseline
+```
 
 ## Contributing
 

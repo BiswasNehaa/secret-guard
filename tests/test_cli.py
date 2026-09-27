@@ -13,6 +13,18 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+try:
+    import tomllib  # noqa: F401
+
+    HAS_TOMLLIB = True
+except ImportError:
+    try:
+        import tomli  # noqa: F401
+
+        HAS_TOMLLIB = True
+    except ImportError:
+        HAS_TOMLLIB = False
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SECRET = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
 CUSTOM_SECRET = "acme_tok_0123456789abcdef0123"
@@ -253,6 +265,41 @@ class CliTest(unittest.TestCase):
             self.assertTrue(result.stdout.lstrip().startswith("<!DOCTYPE html>"))
             self.assertNotIn(SECRET, result.stdout)
 
+    def test_scan_sarif_emits_valid_sarif(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", ".")
+            self.assertEqual(result.returncode, 1)
+            doc = json.loads(result.stdout)
+            self.assertEqual(doc["version"], "2.1.0")
+            results = doc["runs"][0]["results"]
+            self.assertGreaterEqual(len(results), 1)
+            self.assertNotIn(SECRET, result.stdout)
+
+    def test_scan_sarif_ignores_show_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", "--show-value", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn(SECRET, result.stdout)
+            json.loads(result.stdout)
+
+    def test_scan_sarif_locations_reference_file_and_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"\nTOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--sarif", ".")
+            doc = json.loads(result.stdout)
+            location = doc["runs"][0]["results"][0]["locations"][0]
+            physical = location["physicalLocation"]
+            self.assertEqual(physical["artifactLocation"]["uri"], "secret.py")
+            self.assertEqual(physical["region"]["startLine"], 2)
+
     def test_scan_format_flag_selects_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "main.py").write_text("print('clean')\n", encoding="utf-8")
@@ -261,6 +308,9 @@ class CliTest(unittest.TestCase):
             ET.fromstring(xml.stdout)
             html = self.run_cli(tmp, "scan", "--format", "html", ".")
             self.assertTrue(html.stdout.lstrip().startswith("<!DOCTYPE html>"))
+            sarif = self.run_cli(tmp, "scan", "--format", "sarif", ".")
+            self.assertEqual(sarif.returncode, 0)
+            self.assertEqual(json.loads(sarif.stdout)["runs"][0]["results"], [])
             text = self.run_cli(tmp, "scan", "--format", "text", ".")
             self.assertIn("0 total", text.stdout)
 
@@ -447,6 +497,88 @@ class CliTest(unittest.TestCase):
             result = self.run_cli(tmp, "scan", ".")
             self.assertEqual(result.returncode, 2)
             self.assertIn("Error parsing", result.stderr)
+
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
+    def test_scan_loads_config_from_pyproject_toml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\n'
+                'exclude = ["wip"]\n'
+                'no_entropy = true\n',
+                encoding="utf-8",
+            )
+            Path(tmp, "wip").mkdir()
+            Path(tmp, "wip", "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)  # Excluded, so clean!
+
+    def test_scan_pyproject_toml_without_section_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[project]\nname = "demo"\n', encoding="utf-8"
+            )
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("GitHub Token", result.stdout)
+
+    def test_secret_guard_json_takes_precedence_over_pyproject_toml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nexclude = ["wip"]\n', encoding="utf-8"
+            )
+            Path(tmp, "secret-guard.json").write_text(
+                '{"exclude": []}', encoding="utf-8"
+            )
+            Path(tmp, "wip").mkdir()
+            Path(tmp, "wip", "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            # secret-guard.json wins and does not exclude "wip"
+            self.assertEqual(result.returncode, 1)
+
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
+    def test_scan_pyproject_toml_config_warning_on_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nunknown_key = "val"\n', encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(
+                "Warning: Unknown configuration key 'unknown_key'",
+                result.stderr,
+            )
+
+    def test_malformed_pyproject_toml_is_silently_skipped(self):
+        # A pyproject.toml that fails to parse might belong to an unrelated
+        # tool and have nothing to do with secret-guard, so it is treated as
+        # "no config found" rather than a fatal error.
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                "[tool.secret-guard\n", encoding="utf-8"
+            )
+            Path(tmp, "secret.py").write_text(
+                f"TOKEN = '{SECRET}'", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("GitHub Token", result.stdout)
+
+    @unittest.skipUnless(HAS_TOMLLIB, "tomllib/tomli is not installed")
+    def test_scan_pyproject_toml_config_validation_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pyproject.toml").write_text(
+                '[tool.secret-guard]\nno_entropy = "yes"\n', encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be a boolean", result.stderr)
 
     def test_init_scaffolds_documented_starter_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -760,6 +892,52 @@ class CliTest(unittest.TestCase):
             result = self.run_cli(tmp, "scan", ".")
             self.assertEqual(result.returncode, 2)
             self.assertIn("Error: 'max_findings' in", result.stderr)
+
+    def test_scan_skips_secret_in_comment_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 0)
+
+    def test_scan_still_reports_same_secret_in_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\nTOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_flag_reports_commented_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", "--include-comments", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_config_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "secret.py").write_text(
+                f"# TOKEN = '{SECRET}'\n", encoding="utf-8"
+            )
+            config_file = Path(tmp, "secret-guard.json")
+            config_file.write_text(
+                json.dumps({"include_comments": True}), encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 1)
+
+    def test_scan_include_comments_config_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp, "secret-guard.json")
+            config_file.write_text(
+                json.dumps({"include_comments": "yes"}), encoding="utf-8"
+            )
+            result = self.run_cli(tmp, "scan", ".")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Error: 'include_comments' in", result.stderr)
 
     def test_stdin_scan_detects_secret(self):
         result = subprocess.run(

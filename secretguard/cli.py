@@ -7,12 +7,21 @@ import os
 import subprocess
 import sys
 
+try:
+    import tomllib
+except ImportError:  # pragma: no cover - Python < 3.11
+    try:
+        import tomli as tomllib
+    except ImportError:  # pragma: no cover - optional dependency
+        tomllib = None
+
 from . import __version__
 from .reporter import (
     format_console,
     format_csv,
     format_html,
     format_json,
+    format_sarif,
     format_summary,
     format_xml,
 )
@@ -50,24 +59,55 @@ def install_hook(target=".git/hooks/pre-commit"):
     return 0
 
 
-def find_config(start_path):
-    """Search upwards from start_path for secret-guard.json."""
+def _dirs_upwards(start_path):
+    """Yield start_path and every parent directory, closest first."""
 
     curr = os.path.abspath(start_path)
     if os.path.isfile(curr):
         curr = os.path.dirname(curr)
     while True:
-        config_file = os.path.join(curr, CONFIG_FILENAME)
-        if os.path.isfile(config_file):
-            return config_file
+        yield curr
         parent = os.path.dirname(curr)
         if parent == curr:
-            break
+            return
         curr = parent
+
+
+def _pyproject_declares_config(path):
+    """Whether pyproject.toml at path has a non-empty [tool.secret-guard]."""
+
+    if tomllib is None:
+        return False
+    try:
+        with open(path, "rb") as f:
+            document = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return isinstance(document.get("tool", {}).get("secret-guard"), dict)
+
+
+def find_config(start_path):
+    """Search upwards from start_path for secret-guard.json, falling back to
+    a [tool.secret-guard] table in pyproject.toml.
+
+    An explicit secret-guard.json anywhere in the search path takes
+    precedence over any pyproject.toml.
+    """
+
+    dirs = list(_dirs_upwards(start_path))
+    for d in dirs:
+        candidate = os.path.join(d, CONFIG_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+    for d in dirs:
+        candidate = os.path.join(d, PYPROJECT_FILENAME)
+        if os.path.isfile(candidate) and _pyproject_declares_config(candidate):
+            return candidate
     return None
 
 
 CONFIG_FILENAME = "secret-guard.json"
+PYPROJECT_FILENAME = "pyproject.toml"
 KNOWN_CONFIG_KEYS = {
     "//",
     "exclude",
@@ -78,6 +118,7 @@ KNOWN_CONFIG_KEYS = {
     "baseline",
     "severity",
     "max_findings",
+    "include_comments",
 }
 
 
@@ -100,21 +141,38 @@ def _require_list_of(data, key, expected_type, kind, config_path):
         )
 
 
-def load_config(config_path):
-    """Load and validate secret-guard.json."""
+def _load_pyproject_table(config_path):
+    """Return the [tool.secret-guard] table of a pyproject.toml file."""
 
     try:
-        with open(config_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
+        with open(config_path, "rb") as f:
+            document = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
         _config_fatal(f"Error parsing {config_path}: {e}")
     except OSError as e:
         _config_fatal(f"Error reading {config_path}: {e}")
+    return document.get("tool", {}).get("secret-guard", {})
+
+
+def load_config(config_path):
+    """Load and validate secret-guard.json, or the [tool.secret-guard] table
+    of pyproject.toml."""
+
+    if os.path.basename(config_path) == PYPROJECT_FILENAME:
+        data = _load_pyproject_table(config_path)
+    else:
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            _config_fatal(f"Error parsing {config_path}: {e}")
+        except OSError as e:
+            _config_fatal(f"Error reading {config_path}: {e}")
 
     if not isinstance(data, dict):
         _config_fatal(
-            "Error: configuration root in "
-            f"{config_path} must be a JSON object."
+            "Error: configuration in "
+            f"{config_path} must be an object/table."
         )
 
     for key in data:
@@ -129,6 +187,12 @@ def load_config(config_path):
     if "no_entropy" in data and not isinstance(data["no_entropy"], bool):
         _config_fatal(
             f"Error: 'no_entropy' in {config_path} must be a boolean."
+        )
+    if "include_comments" in data and not isinstance(
+        data["include_comments"], bool
+    ):
+        _config_fatal(
+            f"Error: 'include_comments' in {config_path} must be a boolean."
         )
     _require_list_of(data, "skip_rules", str, "strings", config_path)
     _require_list_of(data, "only_rules", str, "strings", config_path)
@@ -176,6 +240,13 @@ def build_parser():
         "--no-entropy", action="store_true",
         help="Disable high-entropy string detection.",
     )
+    scan.add_argument(
+        "--include-comments", action="store_true",
+        help=(
+            "Also report secret-like matches that live only inside a "
+            "comment (default skips them for supported file types)."
+        ),
+    )
     out_group = scan.add_mutually_exclusive_group()
     out_group.add_argument(
         "--json", action="store_true", help="Output JSON instead of a report.",
@@ -196,10 +267,18 @@ def build_parser():
         help="Output a self-contained HTML report instead of a console report.",
     )
     out_group.add_argument(
-        "--format", choices=("text", "json", "csv", "summary", "xml", "html"),
+        "--sarif", action="store_true",
+        help=(
+            "Output a SARIF 2.1.0 report instead of a console report, for "
+            "GitHub Code Scanning. Secret values are always masked."
+        ),
+    )
+    out_group.add_argument(
+        "--format",
+        choices=("text", "json", "csv", "summary", "xml", "html", "sarif"),
         default=None, metavar="FMT",
-        help="Output format: text, json, csv, summary, xml, or html "
-             "(aliases: --json, --csv, --summary, --xml, --html).",
+        help="Output format: text, json, csv, summary, xml, html, or sarif "
+             "(aliases: --json, --csv, --summary, --xml, --html, --sarif).",
     )
     scan.add_argument(
         "--show-value", action="store_true",
@@ -418,12 +497,16 @@ def resolve_baseline(args, config):
             sys.exit(2)
     return config.get("baseline", [])
 
-def _scan_stdin(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _scan_stdin(
+    args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     scanner = Scanner(
         ".", excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
         custom_rules=custom_rules,
     )
     scanner.include_entropy = not no_entropy
+    scanner.skip_comments = not include_comments
     text = sys.stdin.read()
     return scanner.scan_text(args.filename, text)
 
@@ -446,19 +529,27 @@ def _scan_staged(exclude, skip_rules, only_rules, custom_rules):
     return findings
 
 
-def _scan_path(path, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _scan_path(
+    path, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     scanner = Scanner(
         path, excludes=exclude, skip_rules=skip_rules, only_rules=only_rules,
         custom_rules=custom_rules,
     )
     scanner.include_entropy = not no_entropy
+    scanner.skip_comments = not include_comments
     return scanner.scan()
 
 
-def _run_scan(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
+def _run_scan(
+    args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+    include_comments,
+):
     if args.stdin:
         return _scan_stdin(
-            args, exclude, skip_rules, only_rules, no_entropy, custom_rules
+            args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+            include_comments,
         )
     if args.staged:
         return _scan_staged(exclude, skip_rules, only_rules, custom_rules)
@@ -466,7 +557,8 @@ def _run_scan(args, exclude, skip_rules, only_rules, no_entropy, custom_rules):
     findings = []
     for path in args.paths:
         for finding in _scan_path(
-            path, exclude, skip_rules, only_rules, no_entropy, custom_rules
+            path, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+            include_comments,
         ):
             if multi:
                 finding["path"] = os.path.join(
@@ -514,7 +606,7 @@ def _output_format(args):
 
     if args.format is not None:
         return args.format
-    for flag in ("json", "csv", "summary", "xml", "html"):
+    for flag in ("json", "csv", "summary", "xml", "html", "sarif"):
         if getattr(args, flag, False):
             return flag
     return "text"
@@ -544,6 +636,8 @@ def _render_output(args, findings, shown, root, truncated):
         print(format_xml(shown, root, **kwargs))
     elif out_format == "html":
         print(format_html(shown, root, **kwargs))
+    elif out_format == "sarif":
+        print(format_sarif(shown, root, **kwargs))
     else:
         print(format_console(shown, root, color=color, **kwargs))
 
@@ -564,6 +658,9 @@ def cmd_scan(args):
         skip_rules = config.get("skip_rules", [])
         only_rules = config.get("only_rules", [])
     no_entropy = args.no_entropy or config.get("no_entropy", False)
+    include_comments = args.include_comments or config.get(
+        "include_comments", False
+    )
     severity_threshold = getattr(args, "severity", None) or config.get(
         "severity", "low"
     )
@@ -589,7 +686,8 @@ def cmd_scan(args):
     baseline = resolve_baseline(args, config)
 
     findings = _run_scan(
-        args, exclude, skip_rules, only_rules, no_entropy, custom_rules
+        args, exclude, skip_rules, only_rules, no_entropy, custom_rules,
+        include_comments,
     )
 
     findings = filter_baseline(findings, baseline)
@@ -629,6 +727,7 @@ def cmd_init(args):
         ),
         "exclude": [],
         "no_entropy": False,
+        "include_comments": False,
         "skip_rules": [],
         "only_rules": [],
         "rules": [],
