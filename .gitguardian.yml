@@ -4,5 +4,6 @@ version: 2
 secret:
   ignore-paths:
     - tests/
+    - benchmarks/
     - README.md
     - .github/workflows/ci.yml

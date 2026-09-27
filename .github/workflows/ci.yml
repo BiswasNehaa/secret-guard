@@ -83,4 +83,16 @@ jobs:
       - name: Install
         run: pip install ruff
       - name: Ruff check
-        run: ruff check secretguard tests
+        run: ruff check secretguard tests benchmarks
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run scan-performance benchmark
+        run: python -m benchmarks.run
